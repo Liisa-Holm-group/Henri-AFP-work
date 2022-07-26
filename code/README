@@ -1,0 +1,38 @@
+# Follow the steps below:
+#
+# 1. run
+# python3 -m venv .env && source .env/bin/activate && pip install -r requirements.txt
+#
+# 2. generate in-house data cross validated predictions
+# bash ipscan_experiments.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+#
+# 3. generate in-house data stacking predictions
+# bash stacking_experiment.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+#
+# 4. evaluate in-house data cv predictions
+# python process_results.py OUTPUT_PATH
+#
+# 5. train cafa3 first level models on full cafa training data
+# bash train_models.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+#
+# 6. generate cafa3 first level predictions for cafa3 test data
+# bash predict.sh DATA_DIRECTORY_PATH
+#
+# 7. generate cafa3 cross validated predictions for training the stacking models
+# bash ipscan_experiments_cafa3.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+#
+# 8. train cafa3 stacking models on 1. level predictions
+# bash train_stacking_models.sh OUTPUT_PATH
+#
+# 9. generate cafa3 stacking predictions for cafa3 test data
+# bash stacking_predict.sh OUTPUT_PATH
+#
+# 10. evaluate cafa3 predictions
+# cd cafa3_data/cafa3/CAFA_MatlabCode/CAFA2-master/MyAnalysisScripts
+# bash evaluate_predictions.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+#
+# 11. evaluate cafa3 stacking predictions
+# cd cafa3_data/cafa3/CAFA_MatlabCode/CAFA2-master/MyAnalysisScripts
+# bash evaluate_predictions.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+#
+###
