@@ -1,4 +1,11 @@
-# Follow the steps below:
+# Data can be downloaded from the project web page ekhidna2.biocenter.helsinki.fi/AFP
+#
+# Get CAFA evaluation codes from https://github.com/yuxjiang/CAFA2
+# copy that repository to DATA_DIRECTORY_PATH/cafa3_data/cafa3/CAFA_MatlabCode
+# move DATA_DIRECTORY_PATH/cafa3_data/cafa3/MyAnalysisScripts directory to 
+# DATA_DIRECTORY_PATH/cafa3_data/cafa3/CAFA_MatlabCode
+#
+# Follow the steps below to run the experiments:
 #
 # 1. run
 # python3 -m venv .env && source .env/bin/activate && pip install -r requirements.txt
