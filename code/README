@@ -11,7 +11,7 @@
 # python3 -m venv .env && source .env/bin/activate && pip install -r requirements.txt
 #
 # 2. generate in-house data cross validated predictions
-# bash ipscan_experiments.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+# bash ipscan_experiments.sh DATA_DIRECTORY_PATH OUTPUT_PATH (example: bash ipscan_experiments.sh ../data2/data ../results)
 #
 # 3. generate in-house data stacking predictions
 # bash stacking_experiment.sh DATA_DIRECTORY_PATH OUTPUT_PATH
@@ -19,8 +19,8 @@
 # 4. evaluate in-house data cv predictions
 # python process_results.py OUTPUT_PATH
 #
-# 5. train cafa3 first level models on full cafa training data
-# bash train_models.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+# 5. train cafa3 first level models on full cafa training data 
+# bash train_models.sh DATA_DIRECTORY_PATH OUTPUT_PATH (example: bash train_models.sh ../data2/data ../results)
 #
 # 6. generate cafa3 first level predictions for cafa3 test data
 # bash predict.sh DATA_DIRECTORY_PATH
