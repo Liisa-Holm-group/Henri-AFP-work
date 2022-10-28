@@ -601,8 +601,8 @@ def xgboost_test(X, y, go_class, random_state=42):
         cv_predictions.append((prediction, test))
 
     predictions = pr.combine_results(cv_predictions, y.shape[0])
-    if go_class == 10:
-        joblib.dump([m['model'] for m in cv_results], 'test_model')
+    # if go_class == 10:
+    #     joblib.dump([m['model'] for m in cv_results], 'test_model')
 
     return {'predictions':predictions, 'cv_results':cv_results}
 
