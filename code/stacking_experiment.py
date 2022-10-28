@@ -173,7 +173,7 @@ def train_stacking(filenames, targets, go_class, ontology, model, output_path, c
     predictions = combine_results(predictions, targets.shape[0])
     return predictions
 
-def stack_models(model: str, target_path, output_path, ontology, ranking=False, additional=False, taxonomy=False, n_jobs=1, level_3=False,
+def stack_models(model: str, target_path, output_path, ontology, ranking=False, additional=False, taxonomy=False, n_jobs=1, debug=False, level_3=False,
         pool=False, level2_data_path=None, level3_data_path=None, cluster_index_path=None):
 
 
@@ -197,6 +197,10 @@ def stack_models(model: str, target_path, output_path, ontology, ranking=False, 
         cluster_index = None
 
     targets = sp.load_npz(f'{target_path}/{ontology}_targets.npz')
+
+    if debug:
+        targets = targets[:, :20]
+        n_jobs = 20
 
     files = []
     for method in methods:
@@ -245,9 +249,11 @@ if __name__ == '__main__':
     parser.add_argument('additional', type=str)
     parser.add_argument('taxonomy', type=str)
     parser.add_argument('pool', type=str)
+    parser.add_argument('-d', '--debug', action='store_true',
+                        help='debug mode: run the experiment for only 20 classes')
     args = parser.parse_args()
 
     tf = lambda x: True if x =='True' else False
 
     level_3 = tf(args.level3)
-    stack_models(args.model, target_path=args.target_path, output_path=args.output_path, ontology=args.ontology, level_3=level_3, ranking=tf(args.ranking), additional=tf(args.additional), taxonomy=tf(args.taxonomy), pool=tf(args.pool), level2_data_path=args.level2_data_path, level3_data_path='', cluster_index_path=args.cluster_index_path, n_jobs=args.n_jobs, )
+    stack_models(args.model, target_path=args.target_path, output_path=args.output_path, ontology=args.ontology, level_3=level_3, ranking=tf(args.ranking), additional=tf(args.additional), taxonomy=tf(args.taxonomy), pool=tf(args.pool), level2_data_path=args.level2_data_path, level3_data_path='', cluster_index_path=args.cluster_index_path, n_jobs=args.n_jobs, debug=args.debug )
