@@ -32,3 +32,4 @@ sklearn==0.0
 traitlets==4.3.3
 wcwidth==0.1.7
 xgboost==0.90
+pyfms==0.3.4
