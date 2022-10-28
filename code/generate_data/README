@@ -1,0 +1,18 @@
+Post-cafa data generation 
+
+
+codes for generating the in-house data are in the subdirectory in-house_data.
+there, run generate_data.sh to generate the in-house-data 
+
+similarily, in subdirectory cafa3_data, run generate_cafa3_data.sh to generate the cafa3 data.
+
+finally, in subdirectory stacking_data, run generate_stacking_data.sh.
+
+currently, the input data files (ipscan, taxonomy, targetp..) are located in /data/henri.
+
+NOTE, The cafa3 CC  training data was later updated because there were some sequences missing. therefore we generated data matrices for the missing cc data separately, by removing any size-based filter operations (all min_count parameters to zero in load_data.py) from the data generating code and changing data_processsing.py scripts process_taxonomy_line functions feature field selection from 2 to 3. we combined the new data with the old data using the script DATA_DIRECTORY_PATH/combined_cafa3_cc/combine.py the  data directory for the new data (including the base ipscan, taxonomy.. files) is located here:
+kronos:/data/henri/CC_new_CAFA3_data
+
+TODO: collect all input data files for in-house data and cafa data into a directory that can be added to the project web page with these codes.
+
+
