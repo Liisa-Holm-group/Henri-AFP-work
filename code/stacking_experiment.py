@@ -253,6 +253,9 @@ if __name__ == '__main__':
                         help='debug mode: run the experiment for only 20 classes')
     args = parser.parse_args()
 
+    # import sys
+    # print(sys.argv[1:])
+
     tf = lambda x: True if x =='True' else False
 
     level_3 = tf(args.level3)
