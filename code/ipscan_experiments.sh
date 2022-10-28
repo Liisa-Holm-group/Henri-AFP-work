@@ -10,7 +10,7 @@ for ONTOLOGY in "CC" "MF" "BP"
         NAMES="$1/datasets/BP_ipscan_feature_names.joblib" 
         TARGETS="$1/datasets/BP_targets.npz" 
         OUTPUT="$2" 
-        python ipscan_experiment.py "${ONTOLOGY}_${MODEL}" $feature_set "${MODEL}_test" $FEATURES $TARGETS $NAMES $OUTPUT 40
+        python ipscan_experiment.py "${ONTOLOGY}_${MODEL}" $feature_set "${MODEL}_test" $FEATURES $TARGETS $NAMES $OUTPUT 10
     done
 done
 done

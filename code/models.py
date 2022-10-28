@@ -212,7 +212,7 @@ class ModelTrainer:
 class StackingModelTrainer:
     """Train models for each GO-class on a given data"""
 
-    def __init__(self, name, model, tr_feature_path, tr_target_path, output_path, ontology, level_3=False):
+    def __init__(self, name, model, tr_feature_path, tr_target_path, output_path, ontology, additional_features, taxonomy_features, level_3=False):
         """Experiment: string name, go class model function, features and targets paths. output pah"""
         self.name = name
         self.model = model
@@ -222,6 +222,8 @@ class StackingModelTrainer:
         self.debug = False
         self.ontology = ontology
         self.level_3 = level_3
+        self.additional_features=additional_features
+        self.taxonomy_features = taxonomy_features
 
         if 'svm' in str(model) or 'ann' in str(model) or 'sgdc' in str(model):
             self.scaler = True
@@ -231,12 +233,8 @@ class StackingModelTrainer:
     def train_stacking(self, filenames, targets, go_class, ontology, model):
         features = load_predictions(filenames, go_class)
         if not self.level_3:
-            if ontology == 'CC':
-                additional_features = np.load(f'{self.output_path}/new_cc_cv_results/{ontology}_stacking_features.npy')
-                taxonomy_features = sp.load_npz(f'{self.output_path}/new_cc_cv_results/{ontology}_stacking_taxonomy.npz')
-            else:
-                additional_features = np.load(f'{self.output_path}/cafa3_data/datasets/{ontology}_stacking_features.npy')
-                taxonomy_features = sp.load_npz(f'{self.output_path}/cafa3_data/datasets/{ontology}_stacking_taxonomy.npz')
+            additional_features = np.load(self.additional_features)
+            taxonomy_features = sp.load_npz(self.taxonomy_features)
 
             if self.scaler:
                 scaler = MinMaxScaler(feature_range=(0, 1)).fit(features)
@@ -304,7 +302,7 @@ class StackingModelTrainer:
 class StackingPredictor:
     """Predict all GO-classes using pretrained models."""
 
-    def __init__(self, name, model_path, go_class_names, te_feature_path, te_sequences, output_path, ontology, n_jobs=1, tr_feature_path=None,):
+    def __init__(self, name, model_path, go_class_names, te_feature_path, te_sequences, output_path, ontology, additional_features, taxonomy_features, n_jobs=1, tr_feature_path=None,):
         self.name = name
         self.model_path = model_path
         self.te_feature_path = te_feature_path
@@ -315,6 +313,9 @@ class StackingPredictor:
         self.ontology=ontology
         self.tr_feature_path = tr_feature_path
 
+        self.additional_features=additional_features
+        self.taxonomy_features=taxonomy_features
+
         if 'svm' in str(model_path) or 'ann' in str(model_path) or 'sgdc' in str(model_path):
             self.scaler = True
         else:
@@ -324,12 +325,8 @@ class StackingPredictor:
 
         features = load_predictions(filenames, go_class)
 
-        if ontology =='CC':
-            additional_features_tr = np.load(f'{self.output_path}/combined_cafa3_cc/{ontology}_stacking_features.npy')
-            taxonomy_features_tr = sp.load_npz(f'{self.output_path}/combined_cafa3_cc/{ontology}_stacking_taxonomy.npz')
-        else:
-            additional_features = np.load(f'{self.output_path}/cafa3_data/new_results/{ontology}_stacking_features_eval.npy')
-            taxonomy_features = sp.load_npz(f'{self.output_path}/cafa3_data/new_results/{ontology}_stacking_taxonomy.npz')
+        additional_features_tr = np.load(self.additional_features)
+        taxonomy_features_tr = sp.load_npz(self.taxonomy_features)
 
         if self.scaler:
             scaler = model[1]
@@ -599,7 +596,8 @@ def xgboost_test(X, y, go_class, random_state=42):
     for train, test in cv.split(X, y):
         model = XGBClassifier(n_estimators=25, max_depth=7, learning_rate=0.5, alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X[train], y[train].ravel())
         prediction = model.predict_proba(X[test])
-        cv_results.append({'model':model, 'feature_importances':pr.process_feature_importances(model)})
+        # cv_results.append({'model':model, 'feature_importances':pr.process_feature_importances(model)})
+        cv_results.append({'model':model, 'feature_importances':[]})
         cv_predictions.append((prediction, test))
 
     predictions = pr.combine_results(cv_predictions, y.shape[0])

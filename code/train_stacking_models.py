@@ -17,6 +17,10 @@ def main():
     parser.add_argument('output_path')
     parser.add_argument('ontology')
     parser.add_argument('n_jobs', type=int)
+
+    parser.add_argument('additional_features', type=str)
+    parser.add_argument('taxonomy_features', type=str)
+
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug mode: run the experiment for only 20 classes')
     parser.add_argument('--level3', action='store_true', help='train level3 models')
@@ -24,7 +28,7 @@ def main():
     args = parser.parse_args()
 
     model_trainer = models.StackingModelTrainer(args.experiment_name, getattr(models, args.model),
-                                        args.predictions_dir, args.tr_target_path, args.output_path, args.ontology, args.level3)
+                                        args.predictions_dir, args.tr_target_path, args.output_path, args.ontology, args.additional_features, args.taxonomy_features, args. args.level3)
 
     model_trainer.run(n_jobs=args.n_jobs, debug=args.debug)
 
