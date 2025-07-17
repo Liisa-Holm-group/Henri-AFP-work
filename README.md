@@ -21,3 +21,6 @@ I list here things that should be done differently with this work.
 3. Parameter optimization should be done in a better way. There was no separate evaluation data for hyperparameter optimization. We did not use Bayesian hyperparameter optimization at the time.
 3.2. Hao has a code that performs Bayesian hyperparameter optimization for XGB, SVM etc.
 4. Data that project used, included curated predictions. These generate circular logic (data leakage) risk.
+5. Project used only binary classifiers. One should consider multi-label classifiers (pyBoost for example).
+
+55
