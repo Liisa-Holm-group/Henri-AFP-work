@@ -1,0 +1,43 @@
+[project]
+name = "Holm_AFP"
+version = "0.1.0"
+description = "AFP protein function framework"
+authors = ["Henri Tiittanen"]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "autoflake>=2.3.1",
+    "backcall>=0.2.0",
+    "cycler>=0.12.1",
+    "cython>=3.1.2",
+    "decorator>=5.2.1",
+    "h5py>=3.14.0",
+    "ipython>=9.4.0",
+    "ipython-genutils>=0.2.0",
+    "jedi>=0.19.2",
+    "joblib>=1.5.1",
+    "kiwisolver>=1.4.8",
+    "lightgbm>=4.6.0",
+    "matplotlib>=3.10.3",
+    "networkx>=3.5",
+    "numpy>=2.3.2",
+    "pandas>=2.3.1",
+    "parso>=0.8.4",
+    "pexpect>=4.9.0",
+    "pickleshare>=0.7.5",
+    "prompt-toolkit>=3.0.51",
+    "ptyprocess>=0.7.0",
+    "pyflakes>=3.4.0",
+    "pyfms>=0.4.0",
+    "pygments>=2.19.2",
+    "pyparsing>=3.2.3",
+    "python-dateutil>=2.9.0.post0",
+    "pytz>=2025.2",
+    "pyyaml>=6.0.2",
+    "scikit-learn>=1.7.1",
+    "scipy>=1.16.0",
+    "six>=1.17.0",
+    "traitlets>=5.14.3",
+    "wcwidth>=0.2.13",
+    "xgboost>=3.0.2",
+]

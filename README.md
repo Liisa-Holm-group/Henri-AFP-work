@@ -23,4 +23,93 @@ I list here things that should be done differently with this work.
 4. Data that project used, included curated predictions. These generate circular logic (data leakage) risk.
 5. Project used only binary classifiers. One should consider multi-label classifiers (pyBoost for example).
 
-55
+
+Below is the formatted original README.md instructions by Henri
+---
+
+# Download data
+
+### Data can be downloaded from the project web page [ekhidna2.biocenter.helsinki.fi/AFP](ekhidna2.biocenter.helsinki.fi/AFP)
+
+### Get CAFA evaluation codes from [CAFA 2 GitHub yuxjiang ](https\://github.com/yuxjiang/CAFA2)
+
+### copy that repository to `DATA\_DIRECTORY\_PATH/cafa3\_data/cafa3/CAFA\_MatlabCode`
+
+### move `DATA\_DIRECTORY\_PATH/cafa3\_data/cafa3/MyAnalysisScripts directory to`
+
+### `DATA\_DIRECTORY\_PATH/cafa3\_data/cafa3/CAFA\_MatlabCode`
+
+### Follow the steps below to run the experiments:
+
+## 1. Create virtual environment and install dependencies
+
+```bash
+python3 -m venv .env && source .env/bin/activate && pip install -r requirements.txt
+```
+
+## 2. Generate in-house data cross validated predictions
+
+```bash
+bash ipscan_experiments.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+# Example:
+bash ipscan_experiments.sh ../data2/data ../results
+```
+
+## 3. Generate in-house data stacking predictions
+
+```bash
+bash stacking_experiment.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+```
+
+## 4. Evaluate in-house data CV predictions
+
+```bash
+python process_results.py OUTPUT_PATH
+```
+
+## 5. Train CAFA3 first level models on full CAFA training data
+
+```bash
+bash train_models.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+# Example:
+bash train_models.sh ../data2/data ../results
+```
+
+## 6. Generate CAFA3 first level predictions for CAFA3 test data
+
+```bash
+bash predict.sh DATA_DIRECTORY_PATH
+```
+
+## 7. Generate CAFA3 cross validated predictions for training the stacking models
+
+```bash
+bash ipscan_experiments_cafa3.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+```
+
+## 8. Train CAFA3 stacking models on 1st level predictions
+
+```bash
+bash train_stacking_models.sh OUTPUT_PATH
+```
+
+## 9. Generate CAFA3 stacking predictions for CAFA3 test data
+
+```bash
+bash stacking_predict.sh OUTPUT_PATH
+```
+
+## 10. Evaluate CAFA3 predictions
+
+```bash
+cd cafa3_data/cafa3/CAFA_MatlabCode/CAFA2-master/MyAnalysisScripts
+bash evaluate_predictions.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+```
+
+## 11. Evaluate CAFA3 stacking predictions
+
+```bash
+cd cafa3_data/cafa3/CAFA_MatlabCode/CAFA2-master/MyAnalysisScripts
+bash evaluate_predictions.sh DATA_DIRECTORY_PATH OUTPUT_PATH
+```
+
