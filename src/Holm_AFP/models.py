@@ -157,6 +157,12 @@ class ModelTrainer:
 
             y = sp.load_npz(self.tr_target_path).tocsr()
             y.data[:] = 1
+
+            # Keep only features with more than 5 results
+
+            mask = np.squeeze(np.asarray(y.sum(axis=0))) >= 5
+            y = y[:,mask]
+
         else:
             raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
 
@@ -581,13 +587,16 @@ def svm_train(X, y, go_class):
     model = SVC(probability=True,tol=0.1,random_state=42,max_iter=750).fit(X, y.ravel())
     return model
 
-def xgboost_test(X, y, go_class, random_state=42):
+def xgboost_test(X, y, go_class, random_state=42, X_feature_row_indexes: Optional[List[int]] = None):
     """train this function on a particular go class"""
     n_folds=5
     cv = StratifiedKFold(n_splits=n_folds, random_state=42, shuffle=True)
     if go_class % 100 == 0:
         print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
+
+    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
+        X = X[:, X_feature_row_indexes]
 
     cv_results = []
     cv_predictions = []
