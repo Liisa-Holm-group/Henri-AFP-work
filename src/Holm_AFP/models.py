@@ -532,14 +532,21 @@ def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: i
             alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X, y.ravel())
     return model
 
-def lasso_train(X, y, go_class, random_state=42):
+def lasso_train(X, y, go_class, random_state=42, X_feature_row_indexes: Optional[List[int]] = None):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
-    model = SGDClassifier(tol=1e-1, loss='log', penalty='elasticnet', random_state=random_state).fit(X, y.ravel())
+
+    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
+        X = X[:, X_feature_row_indexes]
+    model = SGDClassifier(tol=1e-1, loss='log_loss', penalty='elasticnet', random_state=random_state).fit(X, y.ravel())
     return model
 
-def elasticnet_train(X, y, go_class, random_state=42):
+def elasticnet_train(X, y, go_class, random_state=42, X_feature_row_indexes: Optional[List[int]] = None):
+
+    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
+        X = X[:, X_feature_row_indexes]
+
     return lasso_train(X, y, go_class, random_state=random_state)
 
 
