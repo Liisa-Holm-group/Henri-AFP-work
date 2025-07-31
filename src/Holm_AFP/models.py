@@ -1,10 +1,9 @@
 """Feature selection and classification methods."""
+from typing import Optional, List
 
 from sklearn.neural_network import MLPClassifier
 from datetime import timedelta
-from functools import reduce
 import os
-from pdb import set_trace as bp
 import time
 
 
@@ -14,24 +13,15 @@ import joblib
 import numpy as np
 import pickle
 import scipy.sparse as sp
-from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.metrics import average_precision_score
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.metrics import make_scorer
-from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler
 import warnings
 from sklearn.model_selection import StratifiedKFold
 from xgboost import XGBClassifier
 from joblib import Parallel, delayed
-from joblib.externals.loky import set_loky_pickler
-from joblib import parallel_backend
-from joblib import wrap_non_picklable_objects
-
 import process_results as pr
-import models
 
 np.random.seed(42)
 
@@ -124,17 +114,8 @@ class Predictor:
         models = joblib.load(self.model_path)
         print('loading data')
         X = sp.load_npz(self.te_feature_path).tocsr()
-        base_method = 'binary' if ('svm' in str(self.model_path) or 'fm' in self.model_path) else 'e_value'
-        names = joblib.load(self.feature_names)
-        if 'taxonomy' in self.model_path:
-            feature_type = 'taxonomy'
-        elif 'all' in self.model_path:
-            feature_type = 'all'
-        elif 'ipscan' in self.model_path:
-            feature_type = 'ipscan'
-        elif 'location' in self.model_path:
-            feature_type = 'location'
-        X, names = select_features(names, X, feature_type, base_method)
+
+        feature_type = "new_custom"
 
         sequences = joblib.load(self.te_sequences)
         go_names = joblib.load(self.go_class_names)
@@ -157,29 +138,31 @@ class ModelTrainer:
         """Experiment: string name, go class model function, features and targets paths. output pah"""
         self.name = name
         self.model = model
-        self.tr_feature_path = tr_feature_path
-        self.tr_target_path = tr_target_path
+        self.tr_feature_path = tr_feature_path  # A csr matrix with shape (N, p) (p is the number of features) #NOTE: Was (p,N)
+        self.tr_target_path = tr_target_path    # A csr matrix with shape (N, k) (k is the amount of go classes)
         self.output_path = output_path
-        self.go_class_names = go_class_names
-        self.feature_names = feature_names
+        self.go_class_names = go_class_names    # A joblib with 1D (k,) ndarray of go class names
+        self.feature_names = feature_names  # A joblib with a list of all feature names (p)
         self.debug=False
         self.h5 = h5
         self.classes = classes
         self.random_state = random_state
 
-    def train_models(self, n_jobs, feature_type, base_method, debug=False):
+    def train_models(self, n_jobs: int, feature_type: str):
+
         print('loading matrices')
-        X = sp.load_npz(self.tr_feature_path).tocsr()
-        y = sp.load_npz(self.tr_target_path).tocsr()
-        names = joblib.load(self.feature_names)
+
+        if feature_type == "string_search":
+            X = sp.load_npz(self.tr_feature_path).tocsr()
+
+            y = sp.load_npz(self.tr_target_path).tocsr()
+            y.data[:] = 1
+        else:
+            raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
+
 
         print(f'target shape: {y.shape}')
-        X, _ = select_features(names, X, feature_type, base_method)
         print(f'feature shape: {X.shape}')
-
-        if debug:
-            y = y[:, :2]
-            n_jobs = 2
 
         if self.classes is not None:
             y = y[: ,self.classes.ravel()]
@@ -188,22 +171,27 @@ class ModelTrainer:
         parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
         print('training models')
         if not self.random_state and self.random_state != 0:
-            models = parallel(delayed(self.model)(X, y, go_class) for go_class in range(y.shape[1]))
+            models = parallel(delayed(self.model)(X, y, go_class, X_feature_row_indexes = list(range(10))+[go_class*2+10, go_class*2+10+1]) for go_class in range(y.shape[1]))
         else:
-            models = parallel(delayed(self.model)(X, y, go_class, random_state=self.random_state) for go_class in range(y.shape[1]))
+            models = parallel(delayed(self.model)(X, y, go_class, random_state=self.random_state, X_feature_row_indexes = list(range(10))+[go_class+10])  for go_class in range(y.shape[1]))
 
         elapsed = time.time()-start
         print(f'Training time: {str(timedelta(seconds=elapsed))}')
         return models
 
-    def run(self, n_jobs, feature_types=['ipscan', 'taxonomy', 'location'], debug=False):
+    def run(self, n_jobs, feature_types: Optional[List[str]]=None):
+        # TODO: Add an argument here for the
+        if feature_types is None or len(feature_types) == 0:
+            feature_types = ['string_search']
         for feature_type in feature_types:
-            base_method = 'binary' if ('svm' in str(self.model) or 'fm' in str(self.model))  else 'e_value'
-            models = self.train_models(n_jobs, feature_type, base_method, debug)
+            models = self.train_models(n_jobs, feature_type)
             if not self.random_state and self.random_state != 0:
                 print('saving models')
+                if not os.path.exists(f'{self.output_path}'):
+                    os.mkdir(f'{self.output_path}')
                 joblib.dump(models, f'{self.output_path}/{self.name}_{feature_type}_full_models.joblib',
                                        protocol=pickle.HIGHEST_PROTOCOL)
+                return None
             else:
                 return models
 
@@ -533,10 +521,13 @@ def mean_stacking(X, y, n_additional=0):
 def ranking_mean_stacking(X, y, n_additional=0):
     return MeanStacking(ranking=True).fit(X, y)
 
-def xgb_train(X, y, go_class, random_state=42):
+def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: int = 42, X_feature_row_indexes: Optional[List[int]] = None):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
+
+    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
+        X = X[:, X_feature_row_indexes]
     model = XGBClassifier(n_estimators=25, max_depth=7, learning_rate=0.5,
             alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X, y.ravel())
     return model
