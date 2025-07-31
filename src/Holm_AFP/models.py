@@ -176,11 +176,15 @@ class ModelTrainer:
         start = time.time()
         parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
         print('training models')
-        if not self.random_state and self.random_state != 0:
-            models = parallel(delayed(self.model)(X, y, go_class, X_feature_row_indexes = list(range(10))+[go_class*2+10, go_class*2+10+1]) for go_class in range(y.shape[1]))
-        else:
-            models = parallel(delayed(self.model)(X, y, go_class, random_state=self.random_state, X_feature_row_indexes = list(range(10))+[go_class+10])  for go_class in range(y.shape[1]))
-
+        models = parallel(
+            delayed(self.model)(
+                X[:, list(range(10)) + [go_class * 2 + 10, go_class * 2 + 11]],
+                y,
+                go_class,
+                random_state=self.random_state
+            )
+            for go_class in range(y.shape[1])
+        )
         elapsed = time.time()-start
         print(f'Training time: {str(timedelta(seconds=elapsed))}')
         return models
@@ -527,32 +531,24 @@ def mean_stacking(X, y, n_additional=0):
 def ranking_mean_stacking(X, y, n_additional=0):
     return MeanStacking(ranking=True).fit(X, y)
 
-def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: int = 42, X_feature_row_indexes: Optional[List[int]] = None):
+def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: int = 42):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
 
-    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
-        X = X[:, X_feature_row_indexes]
     model = XGBClassifier(n_estimators=25, max_depth=7, learning_rate=0.5,
             alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X, y.ravel())
     return model
 
-def lasso_train(X, y, go_class, random_state=42, X_feature_row_indexes: Optional[List[int]] = None):
+def lasso_train(X, y, go_class, random_state=42):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
 
-    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
-        X = X[:, X_feature_row_indexes]
     model = SGDClassifier(tol=1e-1, loss='log_loss', penalty='elasticnet', random_state=random_state).fit(X, y.ravel())
     return model
 
-def elasticnet_train(X, y, go_class, random_state=42, X_feature_row_indexes: Optional[List[int]] = None):
-
-    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
-        X = X[:, X_feature_row_indexes]
-
+def elasticnet_train(X, y, go_class, random_state=42):
     return lasso_train(X, y, go_class, random_state=random_state)
 
 
@@ -587,16 +583,13 @@ def svm_train(X, y, go_class):
     model = SVC(probability=True,tol=0.1,random_state=42,max_iter=750).fit(X, y.ravel())
     return model
 
-def xgboost_test(X, y, go_class, random_state=42, X_feature_row_indexes: Optional[List[int]] = None):
+def xgboost_test(X, y, go_class, random_state=42):
     """train this function on a particular go class"""
     n_folds=5
     cv = StratifiedKFold(n_splits=n_folds, random_state=42, shuffle=True)
     if go_class % 100 == 0:
         print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
-
-    if X_feature_row_indexes is not None and len(X_feature_row_indexes)>0:
-        X = X[:, X_feature_row_indexes]
 
     cv_results = []
     cv_predictions = []
