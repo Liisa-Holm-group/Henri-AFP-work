@@ -15,13 +15,13 @@ do
         FEATURES="$1/combined_cafa3_cc/${ONTOLOGY}_cafa3_features.npz"
         TARGETS="$1/combined_cafa3_cc/${ONTOLOGY}_targets.npz"
 
-        python train_models.py "${MODEL}_${ONTOLOGY}" "${MODEL}_train" "${DATA_PATH}/${ONTOLOGY}_target_names.joblib" "${DATA_PATH}/${ONTOLOGY}_cafa3_only_ipscan_features.npz" "${DATA_PATH}/${ONTOLOGY}_targets.npz" "${DATA_PATH}/${ONTOLOGY}_cafa3_only_ipscan_feature_names.joblib" $OUTPUT_PATH 50 1
+        python train_models.py "${MODEL}_${ONTOLOGY}" "${MODEL}_train" "${DATA_PATH}/${ONTOLOGY}_target_names.joblib" "${DATA_PATH}/${ONTOLOGY}_cafa3_only_ipscan_features.npz" "${DATA_PATH}/${ONTOLOGY}_targets.npz" "${DATA_PATH}/${ONTOLOGY}_cafa3_only_ipscan_feature_names.joblib" $OUTPUT_PATH 30 1
     else
         FEATURES="$1/cafa3_data/datasets/${ONTOLOGY}_cafa3_features.npz"
         TARGETS="$1/cafa3_data/datasets/${ONTOLOGY}_targets.npz"
     fi
 
-        python train_models.py "${MODEL}_${ONTOLOGY}" "${MODEL}_train" "${DATA_PATH}/${ONTOLOGY}_target_names.joblib" "${DATA_PATH}/${ONTOLOGY}_cafa3_features.npz" "${DATA_PATH}/${ONTOLOGY}_targets.npz" "${DATA_PATH}/${ONTOLOGY}_cafa3_feature_names.joblib" $OUTPUT_PATH 50 0
+        python train_models.py "${MODEL}_${ONTOLOGY}" "${MODEL}_train" "${DATA_PATH}/${ONTOLOGY}_target_names.joblib" "${DATA_PATH}/${ONTOLOGY}_cafa3_features.npz" "${DATA_PATH}/${ONTOLOGY}_targets.npz" "${DATA_PATH}/${ONTOLOGY}_cafa3_feature_names.joblib" $OUTPUT_PATH 30 0
         
 
     done
