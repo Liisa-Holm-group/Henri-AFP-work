@@ -31,6 +31,12 @@ mpl.use('Agg')
 def save_cafa_format(predictions, sequences, go_names, filename):
     nonzero = predictions.nonzero()
     nonzero_indices = zip(list(nonzero[0]), list(nonzero[1]))
+    # Get filename dir
+    directory = os.path.dirname(filename)
+
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+
     with open(filename, 'w+') as f:
         for row, column in nonzero_indices:
             f.write(f'{sequences[row]}\tGO:{go_names[column]}\t{predictions[row, column]:.5f}\t\n')
