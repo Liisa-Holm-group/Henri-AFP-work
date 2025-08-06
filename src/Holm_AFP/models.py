@@ -98,10 +98,10 @@ class Predictor:
         self.feature_names = feature_names
         self.h5 = h5
 
-    def predict(self, X, models, n_jobs, model_type = str):
+    def predict(self, X, models, n_jobs, feature_type = str):
         """Given sequence features X, predict prob for each go-class."""
 
-        if model_type == "string_search":
+        if feature_type == "string_search":
             parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
             res = parallel(
                     delayed(predict)(
@@ -116,9 +116,10 @@ class Predictor:
             assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
             return predictions
         else:
-            raise ValueError("model_type must be 'string_search'")
+            # TODO: Implement more types here!
+            raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
 
-    def run(self, model_type: str = "string_search"):
+    def run(self, feature_type: str = "string_search"):
         """Predict and save results."""
 
         print('loading models')
@@ -126,12 +127,10 @@ class Predictor:
         print('loading data')
         X = sp.load_npz(self.te_feature_path).tocsr()
 
-        feature_type = "new_custom"
-
         sequences = joblib.load(self.te_sequences)
         go_names = joblib.load(self.go_class_names)
         print('predicting')
-        predictions = self.predict(X, models, self.n_jobs, model_type) # output: n_seq x n_go matrix
+        predictions = self.predict(X, models, self.n_jobs, feature_type) # output: n_seq x n_go matrix
 
         print('saving predictions')
         if self.h5:
@@ -190,6 +189,7 @@ class ModelTrainer:
             print(f'Training time: {str(timedelta(seconds=elapsed))}')
             return models
         else:
+            # TODO: Implement more types here!
             raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
 
 
