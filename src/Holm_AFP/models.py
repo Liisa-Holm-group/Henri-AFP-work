@@ -164,32 +164,30 @@ class ModelTrainer:
             X = sp.load_npz(self.tr_feature_path).tocsr()
 
             y = sp.load_npz(self.tr_target_path).tocsr()
+            print(f'target shape: {y.shape}')
+            print(f'feature shape: {X.shape}')
 
+            if self.classes is not None:
+                y = y[:, self.classes.ravel()]
+
+            start = time.time()
+            parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
+            print('training models')
+            models = parallel(
+                delayed(self.model)(
+                    X[:, list(range(10)) + [go_class * 2 + 10, go_class * 2 + 11]],
+                    y,
+                    go_class,
+                    random_state=self.random_state
+                )
+                for go_class in range(y.shape[1])
+            )
+            elapsed = time.time() - start
+            print(f'Training time: {str(timedelta(seconds=elapsed))}')
+            return models
         else:
             raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
 
-
-        print(f'target shape: {y.shape}')
-        print(f'feature shape: {X.shape}')
-
-        if self.classes is not None:
-            y = y[: ,self.classes.ravel()]
-
-        start = time.time()
-        parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-        print('training models')
-        models = parallel(
-            delayed(self.model)(
-                X[:, list(range(10)) + [go_class * 2 + 10, go_class * 2 + 11]],
-                y,
-                go_class,
-                random_state=self.random_state
-            )
-            for go_class in range(y.shape[1])
-        )
-        elapsed = time.time()-start
-        print(f'Training time: {str(timedelta(seconds=elapsed))}')
-        return models
 
     def run(self, n_jobs, feature_types: Optional[List[str]]=None):
         # TODO: Add an argument here for the
