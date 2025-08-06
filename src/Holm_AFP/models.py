@@ -100,9 +100,16 @@ class Predictor:
 
     def predict(self, X, models, n_jobs):
         """Given sequence features X, predict prob for each go-class."""
-        res = []
         parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-        res = parallel(delayed(predict)(X, model, i) for i, model in enumerate(models))
+        res = parallel(
+                delayed(predict)(
+                # TODO: Remove hard-coded index 10 from the list
+                X[:, list(range(10)) + [i * 2 + 10, i * 2 + 11]],
+                model,
+                i,
+            )
+            for i, model in enumerate(models)
+        )
         predictions = np.hstack(res)
         assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
         return predictions
@@ -127,6 +134,7 @@ class Predictor:
             predictions = predictions.T
             with h5py.File(f'{self.output_path}/{self.name}_{feature_type}_predictions.h5', 'w', libver='latest') as f:
                 for i, arr in enumerate(predictions):
+                    # TODO: Why is this unused?
                     dset = f.create_dataset(str(i), shape=(predictions[0].shape), data=arr, compression='gzip', compression_opts=9)
         else:
             pr.save_cafa_format(predictions, sequences, go_names, f'{self.output_path}/{self.name}_{feature_type}_predictions')
@@ -156,12 +164,6 @@ class ModelTrainer:
             X = sp.load_npz(self.tr_feature_path).tocsr()
 
             y = sp.load_npz(self.tr_target_path).tocsr()
-            y.data[:] = 1
-
-            # Keep only features with more than 5 results
-
-            mask = np.squeeze(np.asarray(y.sum(axis=0))) >= 5
-            y = y[:,mask]
 
         else:
             raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
