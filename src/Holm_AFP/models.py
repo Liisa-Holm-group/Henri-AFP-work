@@ -98,23 +98,27 @@ class Predictor:
         self.feature_names = feature_names
         self.h5 = h5
 
-    def predict(self, X, models, n_jobs):
+    def predict(self, X, models, n_jobs, model_type = str):
         """Given sequence features X, predict prob for each go-class."""
-        parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-        res = parallel(
-                delayed(predict)(
-                # TODO: Remove hard-coded index 10 from the list
-                X[:, list(range(10)) + [i * 2 + 10, i * 2 + 11]],
-                model,
-                i,
-            )
-            for i, model in enumerate(models)
-        )
-        predictions = np.hstack(res)
-        assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
-        return predictions
 
-    def run(self):
+        if model_type == "string_search":
+            parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
+            res = parallel(
+                    delayed(predict)(
+                    # TODO: Remove hard-coded index 10 from the list
+                    X[:, list(range(10)) + [i * 2 + 10, i * 2 + 11]],
+                    model,
+                    i,
+                )
+                for i, model in enumerate(models)
+            )
+            predictions = np.hstack(res)
+            assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
+            return predictions
+        else:
+            raise ValueError("model_type must be 'string_search'")
+
+    def run(self, model_type: str = "string_search"):
         """Predict and save results."""
 
         print('loading models')
@@ -127,7 +131,7 @@ class Predictor:
         sequences = joblib.load(self.te_sequences)
         go_names = joblib.load(self.go_class_names)
         print('predicting')
-        predictions = self.predict(X, models, self.n_jobs) # output: n_seq x n_go matrix
+        predictions = self.predict(X, models, self.n_jobs, model_type) # output: n_seq x n_go matrix
 
         print('saving predictions')
         if self.h5:

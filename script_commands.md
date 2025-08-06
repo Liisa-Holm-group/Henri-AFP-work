@@ -17,14 +17,15 @@ Note: The commands listed below are expected to be run from the [source](./src/H
 
 Here is an input to trian a model using Lasso on a dataset with only 300 GO classes
 ```{bash}
-train_models.py
-lasso_predict
-/scratch/project_2008455/Henri-AFP-work/results/lasso_max_old_data_train_string_search_full_models.joblib
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/truth_go_list.joblib
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/X_sparse.npz
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/gene_list.joblib
-../../results
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/feature_list.joblib
+python train_models.py \
+lasso_max_old_data_train \
+lasso_train \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/truth_go_list.joblib \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/X_sparse.npz \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/y_sparse.npz \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/feature_list.joblib \
+../../results \
+26
 ```
 
 The model results are saved in the root directory in the directory ```/results```
@@ -38,13 +39,13 @@ Next we create model
 Note: We try to predict on the same data we used for training in this example
 
 ```{bash}
-predict.py
-lasso_predict
-/scratch/project_2008455/Henri-AFP-work/results/lasso_max_old_data_train_string_search_full_models.joblib
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/truth_go_list.joblib
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/X_sparse.npz
-/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/gene_list.joblib
-../../results
+python predict.py \
+lasso_predict \
+/scratch/project_2008455/Henri-AFP-work/results/lasso_max_old_data_train_string_search_full_models.joblib \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/truth_go_list.joblib \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/X_sparse.npz \
+/scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/gene_list.joblib \
+../../results \
 /scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/feature_list.joblib
 ```
 
