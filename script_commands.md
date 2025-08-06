@@ -17,6 +17,7 @@ Note: The commands listed below are expected to be run from the [source](./src/H
 
 Here is an input to trian a model using Lasso on a dataset with only 300 GO classes
 ```{bash}
+train_models.py
 lasso_predict
 /scratch/project_2008455/Henri-AFP-work/results/lasso_max_old_data_train_string_search_full_models.joblib
 /scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/truth_go_list.joblib
@@ -37,6 +38,7 @@ Next we create model
 Note: We try to predict on the same data we used for training in this example
 
 ```{bash}
+predict.py
 lasso_predict
 /scratch/project_2008455/Henri-AFP-work/results/lasso_max_old_data_train_string_search_full_models.joblib
 /scratch/project_2008455/Max_temp/diamond_search/data/training_data/old_data_300_go_terms/truth_go_list.joblib
