@@ -18,7 +18,6 @@ def main():
     parser.add_argument('feature_names')
     parser.add_argument('output_path')
     parser.add_argument('n_jobs', type=int)
-    parser.add_argument('only_ipscan', type=int)
     parser.add_argument('-d', '--debug', action='store_true',
                         help='debug mode: run the experiment for only 20 classes')
 
@@ -28,8 +27,7 @@ def main():
                                         args.go_class_names, args.tr_feature_path,
                                         args.tr_target_path, args.feature_names, args.output_path)
 
-    feature_sets = ['ipscan'] if args.only_ipscan else ['taxonomy', 'location']
-    model_trainer.run(n_jobs=args.n_jobs, debug=args.debug, feature_types=feature_sets)
+    model_trainer.run(n_jobs=args.n_jobs)
 
 if __name__ == '__main__':
     main()

@@ -1,3 +1,5 @@
+### Example scripts to run code can be found in [script_commands.md](./script_commands.md)
+
 This code represents the code that Henri Tiittanen did in our group on protein function prediction (Automated Function Prediction, AFP). Link to preprint that describes the work and results in detail is here:
 
 https://www.biorxiv.org/content/10.1101/2022.08.10.503467v1
