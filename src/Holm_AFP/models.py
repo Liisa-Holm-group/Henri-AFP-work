@@ -72,7 +72,7 @@ def select_features(names, features, feature_type, base_method='taxonomy', only_
 
 
 def predict(X, model, i):
-    "Apply a model to a feature vector X."""
+    """Apply a model to a feature vector X."""
 
     if not i % 10:
         print(f'model {i}')
@@ -83,6 +83,21 @@ def predict(X, model, i):
     except IndexError:
         pass
     return prediction.reshape(-1, 1).round(2)
+
+
+def predict_on_go_class(X, model, go_class_index):
+    """ A helper function to split data outside the main thread before predicting"""
+    cols = list(range(10)) + [go_class_index * 2 + 10, go_class_index * 2 + 11]
+    Xi = X[:, cols]
+    return predict(Xi, model, go_class_index)
+
+
+def train_on_go_class(X, y, random_state, model, go_class_index):
+    """ A helper function to split data outside the main thread before training"""
+    cols = list(range(10)) + [go_class_index * 2 + 10, go_class_index * 2 + 11]
+    Xi = X[:, cols]
+    return model(Xi, y, go_class_index, random_state)
+
 
 class Predictor:
     """Predict all GO-classes using pretrained models."""
@@ -103,15 +118,8 @@ class Predictor:
 
         if feature_type == "string_search":
             parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-            res = parallel(
-                    delayed(predict)(
-                    # TODO: Remove hard-coded index 10 from the list
-                    X[:, list(range(10)) + [i * 2 + 10, i * 2 + 11]],
-                    model,
-                    i,
-                )
-                for i, model in enumerate(models)
-            )
+            res = parallel(delayed(predict_on_go_class)
+                           (X, model, go_class_index) for go_class_index, model in enumerate(models))
             predictions = np.hstack(res)
             assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
             return predictions
@@ -177,13 +185,14 @@ class ModelTrainer:
             parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
             print('training models')
             models = parallel(
-                delayed(self.model)(
-                    X[:, list(range(10)) + [go_class * 2 + 10, go_class * 2 + 11]],
-                    y,
-                    go_class,
-                    random_state=self.random_state
+                delayed(train_on_go_class)(
+                    X=X,
+                    y=y,
+                    model=self.model,
+                    random_state=self.random_state,
+                    go_class_index=go_class_index,
                 )
-                for go_class in range(y.shape[1])
+                for go_class_index in range(y.shape[1])
             )
             elapsed = time.time() - start
             print(f'Training time: {str(timedelta(seconds=elapsed))}')
