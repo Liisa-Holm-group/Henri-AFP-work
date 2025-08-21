@@ -31,9 +31,15 @@ mpl.use('Agg')
 def save_cafa_format(predictions, sequences, go_names, filename):
     nonzero = predictions.nonzero()
     nonzero_indices = zip(list(nonzero[0]), list(nonzero[1]))
+    # Get filename dir
+    directory = os.path.dirname(filename)
+
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+
     with open(filename, 'w+') as f:
         for row, column in nonzero_indices:
-            f.write(f'{sequences[row]}\tGO:{go_names[column]}\t{predictions[row, column]:.5f}\t\n')
+            f.write(f'{sequences[row]}\t{list(go_names)[column]}\t{predictions[row, column]:.5f}\t\n')
 
 def targets_to_cafa(dir_, ontology, eval_data=True):
     eval_str = 'eval_' if eval_data else ''

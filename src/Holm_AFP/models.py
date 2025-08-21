@@ -1,10 +1,9 @@
 """Feature selection and classification methods."""
+from typing import Optional, List
 
 from sklearn.neural_network import MLPClassifier
 from datetime import timedelta
-from functools import reduce
 import os
-from pdb import set_trace as bp
 import time
 
 
@@ -14,24 +13,15 @@ import joblib
 import numpy as np
 import pickle
 import scipy.sparse as sp
-from sklearn.feature_selection import SelectKBest, chi2
 from sklearn.linear_model import LogisticRegression, SGDClassifier
 from sklearn.metrics import average_precision_score
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
-from sklearn.metrics import make_scorer
-from sklearn.model_selection import GridSearchCV
+from sklearn.preprocessing import MinMaxScaler
 from sklearn.svm import SVC
-from sklearn.preprocessing import StandardScaler
 import warnings
 from sklearn.model_selection import StratifiedKFold
 from xgboost import XGBClassifier
 from joblib import Parallel, delayed
-from joblib.externals.loky import set_loky_pickler
-from joblib import parallel_backend
-from joblib import wrap_non_picklable_objects
-
 import process_results as pr
-import models
 
 np.random.seed(42)
 
@@ -108,44 +98,46 @@ class Predictor:
         self.feature_names = feature_names
         self.h5 = h5
 
-    def predict(self, X, models, n_jobs):
+    def predict(self, X, models, n_jobs, feature_type = str):
         """Given sequence features X, predict prob for each go-class."""
-        res = []
-        parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-        res = parallel(delayed(predict)(X, model, i) for i, model in enumerate(models))
-        predictions = np.hstack(res)
-        assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
-        return predictions
 
-    def run(self):
+        if feature_type == "string_search":
+            parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
+            res = parallel(
+                    delayed(predict)(
+                    # TODO: Remove hard-coded index 10 from the list
+                    X[:, list(range(10)) + [i * 2 + 10, i * 2 + 11]],
+                    model,
+                    i,
+                )
+                for i, model in enumerate(models)
+            )
+            predictions = np.hstack(res)
+            assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
+            return predictions
+        else:
+            # TODO: Implement more types here!
+            raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
+
+    def run(self, feature_type: str = "string_search"):
         """Predict and save results."""
 
         print('loading models')
         models = joblib.load(self.model_path)
         print('loading data')
         X = sp.load_npz(self.te_feature_path).tocsr()
-        base_method = 'binary' if ('svm' in str(self.model_path) or 'fm' in self.model_path) else 'e_value'
-        names = joblib.load(self.feature_names)
-        if 'taxonomy' in self.model_path:
-            feature_type = 'taxonomy'
-        elif 'all' in self.model_path:
-            feature_type = 'all'
-        elif 'ipscan' in self.model_path:
-            feature_type = 'ipscan'
-        elif 'location' in self.model_path:
-            feature_type = 'location'
-        X, names = select_features(names, X, feature_type, base_method)
 
         sequences = joblib.load(self.te_sequences)
         go_names = joblib.load(self.go_class_names)
         print('predicting')
-        predictions = self.predict(X, models, self.n_jobs) # output: n_seq x n_go matrix
+        predictions = self.predict(X, models, self.n_jobs, feature_type) # output: n_seq x n_go matrix
 
         print('saving predictions')
         if self.h5:
             predictions = predictions.T
             with h5py.File(f'{self.output_path}/{self.name}_{feature_type}_predictions.h5', 'w', libver='latest') as f:
                 for i, arr in enumerate(predictions):
+                    # TODO: Why is this unused?
                     dset = f.create_dataset(str(i), shape=(predictions[0].shape), data=arr, compression='gzip', compression_opts=9)
         else:
             pr.save_cafa_format(predictions, sequences, go_names, f'{self.output_path}/{self.name}_{feature_type}_predictions')
@@ -157,53 +149,63 @@ class ModelTrainer:
         """Experiment: string name, go class model function, features and targets paths. output pah"""
         self.name = name
         self.model = model
-        self.tr_feature_path = tr_feature_path
-        self.tr_target_path = tr_target_path
+        self.tr_feature_path = tr_feature_path  # A csr matrix with shape (N, p) (p is the number of features) #NOTE: Was (p,N)
+        self.tr_target_path = tr_target_path    # A csr matrix with shape (N, k) (k is the amount of go classes)
         self.output_path = output_path
-        self.go_class_names = go_class_names
-        self.feature_names = feature_names
+        self.go_class_names = go_class_names    # A joblib with 1D (k,) ndarray of go class names
+        self.feature_names = feature_names  # A joblib with a list of all feature names (p)
         self.debug=False
         self.h5 = h5
         self.classes = classes
         self.random_state = random_state
 
-    def train_models(self, n_jobs, feature_type, base_method, debug=False):
+    def train_models(self, n_jobs: int, feature_type: str):
+
         print('loading matrices')
-        X = sp.load_npz(self.tr_feature_path).tocsr()
-        y = sp.load_npz(self.tr_target_path).tocsr()
-        names = joblib.load(self.feature_names)
 
-        print(f'target shape: {y.shape}')
-        X, _ = select_features(names, X, feature_type, base_method)
-        print(f'feature shape: {X.shape}')
+        if feature_type == "string_search":
+            X = sp.load_npz(self.tr_feature_path).tocsr()
 
-        if debug:
-            y = y[:, :2]
-            n_jobs = 2
+            y = sp.load_npz(self.tr_target_path).tocsr()
+            print(f'target shape: {y.shape}')
+            print(f'feature shape: {X.shape}')
 
-        if self.classes is not None:
-            y = y[: ,self.classes.ravel()]
+            if self.classes is not None:
+                y = y[:, self.classes.ravel()]
 
-        start = time.time()
-        parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-        print('training models')
-        if not self.random_state and self.random_state != 0:
-            models = parallel(delayed(self.model)(X, y, go_class) for go_class in range(y.shape[1]))
+            start = time.time()
+            parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
+            print('training models')
+            models = parallel(
+                delayed(self.model)(
+                    X[:, list(range(10)) + [go_class * 2 + 10, go_class * 2 + 11]],
+                    y,
+                    go_class,
+                    random_state=self.random_state
+                )
+                for go_class in range(y.shape[1])
+            )
+            elapsed = time.time() - start
+            print(f'Training time: {str(timedelta(seconds=elapsed))}')
+            return models
         else:
-            models = parallel(delayed(self.model)(X, y, go_class, random_state=self.random_state) for go_class in range(y.shape[1]))
+            # TODO: Implement more types here!
+            raise ValueError(f"Invalid feature type '{feature_type}'. Must be 'string_search'.")
 
-        elapsed = time.time()-start
-        print(f'Training time: {str(timedelta(seconds=elapsed))}')
-        return models
 
-    def run(self, n_jobs, feature_types=['ipscan', 'taxonomy', 'location'], debug=False):
+    def run(self, n_jobs, feature_types: Optional[List[str]]=None):
+        # TODO: Add an argument here for the
+        if feature_types is None or len(feature_types) == 0:
+            feature_types = ['string_search']
         for feature_type in feature_types:
-            base_method = 'binary' if ('svm' in str(self.model) or 'fm' in str(self.model))  else 'e_value'
-            models = self.train_models(n_jobs, feature_type, base_method, debug)
+            models = self.train_models(n_jobs, feature_type)
             if not self.random_state and self.random_state != 0:
                 print('saving models')
+                if not os.path.exists(f'{self.output_path}'):
+                    os.mkdir(f'{self.output_path}')
                 joblib.dump(models, f'{self.output_path}/{self.name}_{feature_type}_full_models.joblib',
                                        protocol=pickle.HIGHEST_PROTOCOL)
+                return None
             else:
                 return models
 
@@ -533,10 +535,11 @@ def mean_stacking(X, y, n_additional=0):
 def ranking_mean_stacking(X, y, n_additional=0):
     return MeanStacking(ranking=True).fit(X, y)
 
-def xgb_train(X, y, go_class, random_state=42):
+def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: int = 42):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
+
     model = XGBClassifier(n_estimators=25, max_depth=7, learning_rate=0.5,
             alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X, y.ravel())
     return model
@@ -545,7 +548,8 @@ def lasso_train(X, y, go_class, random_state=42):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
-    model = SGDClassifier(tol=1e-1, loss='log', penalty='elasticnet', random_state=random_state).fit(X, y.ravel())
+
+    model = SGDClassifier(tol=1e-1, loss='log_loss', penalty='elasticnet', random_state=random_state).fit(X, y.ravel())
     return model
 
 def elasticnet_train(X, y, go_class, random_state=42):
