@@ -589,10 +589,13 @@ def lasso_train(X, y, go_class, random_state=42, **kwargs):
     model = SGDClassifier(tol=1e-1, loss='log_loss', penalty='elasticnet', random_state=random_state).fit(X, y.ravel())
     return model
 
-def elasticnet_train(X, y, go_class, random_state=42):
-    return lasso_train(X, y, go_class, random_state=random_state)
-
-
+def dummy_train(X, y, go_class, **kwargs):
+    """Make a dummy model that predicts the class mean"""
+    print(f'started training GO class {go_class}')
+    y = y[:, go_class].toarray().ravel()
+    model = ConstantBinaryPredictor(constant=np.unique(y)[0])
+    model.fit(X, y)
+    return model
 
 
 def elasticnet_train(X, y, go_class, random_state=42, **kwargs):
