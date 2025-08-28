@@ -94,7 +94,7 @@ def predict_on_go_class(X, model, go_class_index):
     return predict(Xi, model, go_class_index)
 
 
-def train_on_go_class(X, y, random_state, model, go_class_index):
+def train_on_go_class_string_search(X, y, model, go_class_index, **model_kwargs):
     """ A helper function to split data outside the main thread before training"""
     cols = list(range(10)) + [go_class_index * 2 + 10, go_class_index * 2 + 11]
     Xi = X[:, cols]
@@ -546,7 +546,7 @@ def mean_stacking(X, y, n_additional=0):
 def ranking_mean_stacking(X, y, n_additional=0):
     return MeanStacking(ranking=True).fit(X, y)
 
-def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: int = 42):
+def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: int = 42, **kwargs):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
@@ -555,7 +555,7 @@ def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: i
             alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X, y.ravel())
     return model
 
-def lasso_train(X, y, go_class, random_state=42):
+def lasso_train(X, y, go_class, random_state=42, **kwargs):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
@@ -568,9 +568,14 @@ def elasticnet_train(X, y, go_class, random_state=42):
 
 
 
+
+def elasticnet_train(X, y, go_class, random_state=42, **kwargs):
+    return lasso_train(X, y, go_class, random_state=random_state)
+
+
 # @delayed
 # @wrap_non_picklable_objects
-def fm_train(X, y, go_class, random_state=42):
+def fm_train(X, y, go_class, random_state=42, **kwargs):
     """train this function on a particular go class"""
     np.random.seed(random_state)
     import pyfms
@@ -583,7 +588,7 @@ def fm_train(X, y, go_class, random_state=42):
     model.fit(X, y.ravel(), nb_epoch=6,batch_size=250)
     return model
 
-def svm_train(X, y, go_class):
+def svm_train(X, y, go_class, **kwargs):
     """Train the model on full data"""
     print(f'started training GO class {go_class}')
     y = y[:, go_class].toarray()
@@ -598,7 +603,7 @@ def svm_train(X, y, go_class):
     model = SVC(probability=True,tol=0.1,random_state=42,max_iter=750).fit(X, y.ravel())
     return model
 
-def xgboost_test(X, y, go_class, random_state=42):
+def xgboost_test(X, y, go_class, random_state=42, **kwargs):
     """train this function on a particular go class"""
     n_folds=5
     cv = StratifiedKFold(n_splits=n_folds, random_state=42, shuffle=True)
@@ -621,7 +626,7 @@ def xgboost_test(X, y, go_class, random_state=42):
 
     return {'predictions':predictions, 'cv_results':cv_results}
 
-def fm_test(X, y, go_class, random_state=42):
+def fm_test(X, y, go_class, random_state=42, **kwargs):
     """train this function on a particular go class"""
     n_folds=5
     cv = StratifiedKFold(n_splits=n_folds, random_state=random_state, shuffle=True)
@@ -652,7 +657,7 @@ def fm_test(X, y, go_class, random_state=42):
     predictions = pr.combine_results(cv_predictions, y.shape[0])
     return {'predictions':predictions, 'cv_results':cv_results}
 
-def ann_test(X, y, go_class):
+def ann_test(X, y, go_class, **kwargs):
     """train this function on a particular go class"""
     n_folds=5
     cv = StratifiedKFold(n_splits=n_folds, random_state=42, shuffle=True)
@@ -706,7 +711,7 @@ def svm_test(X, y, go_class):
     return {'predictions':predictions, 'cv_results':cv_results}
 
 
-def lasso_test(X, y, go_class):
+def lasso_test(X, y, go_class, **kwargs):
     """train this function on a particular go class"""
     n_folds=5
     cv = StratifiedKFold(n_splits=n_folds, random_state=42, shuffle=True)
