@@ -81,7 +81,9 @@ def predict(X, model, i):
     try:
         prediction = prediction[:,1]
     except IndexError:
-        pass
+        print(f"Index error caught in model {i}")
+    except Exception as ex:
+        raise type(ex)(f"Error in model index {i}: {ex}") from ex
     return prediction.reshape(-1, 1).round(2)
 
 
