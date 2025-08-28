@@ -94,10 +94,16 @@ def predict_on_go_class(X, model, go_class_index):
     return predict(Xi, model, go_class_index)
 
 
-def train_on_go_class_string_search(X, y, model, go_class_index, **model_kwargs):
-    """ A helper function to split data outside the main thread before training"""
-    cols = list(range(10)) + [go_class_index * 2 + 10, go_class_index * 2 + 11]
+def train_on_go_class_string_search(X, y, model, go_class_index, return_dummy_if_y_is_uniform: bool = False, **model_kwargs):
+    """ A helper function to split data outside the main thread before training. Fallback to a constant binary predictor
+    if the y data only contains a single value."""
     Xi = X[:, cols]
+
+    if return_dummy_if_y_is_uniform:
+        y_vector = y[:, go_class_index].toarray().ravel()
+        unique_y_values = np.unique(y_vector)
+        if unique_y_values.size == 1:
+            return ConstantBinaryPredictor(int(unique_y_values[0])).fit(Xi, y_vector)
     try:
         return model(Xi, y, go_class_index, **model_kwargs)
     except Exception as ex:
@@ -557,6 +563,23 @@ def xgb_train(X: sp.csr_matrix, y: sp.csr_matrix, go_class: int, random_state: i
     model = XGBClassifier(n_estimators=25, max_depth=7, learning_rate=0.5,
             alpha=0.1, objective='binary:logistic', random_state=random_state).fit(X, y.ravel())
     return model
+
+
+class ConstantBinaryPredictor:
+    """Predicts a fixed class with sklearn-like predict_proba."""
+    def __init__(self, constant: int):
+        self.constant = int(constant)  # 0 or 1
+
+    def fit(self, X, y=None):
+        return self
+
+    def predict_proba(self, X):
+        n = X.shape[0]
+        if self.constant == 1:
+            return np.column_stack([np.zeros(n), np.ones(n)])
+        else:
+            return np.column_stack([np.ones(n), np.zeros(n)])
+
 
 def lasso_train(X, y, go_class, random_state=42, **kwargs):
     """Train the model on full data"""
