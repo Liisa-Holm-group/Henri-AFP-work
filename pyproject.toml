@@ -8,6 +8,7 @@ requires-python = ">=3.11"
 dependencies = [
     "autoflake>=2.3.1",
     "backcall>=0.2.0",
+    "cafaeval>=1.2.1",
     "cycler>=0.12.1",
     "cython>=3.1.2",
     "decorator>=5.2.1",
@@ -42,3 +43,6 @@ dependencies = [
     "wcwidth>=0.2.13",
     "xgboost>=3.0.2",
 ]
+
+[tool.uv.sources]
+cafaeval = { git = "https://github.com/BioComputingUP/CAFA-evaluator.git" }
