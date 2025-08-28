@@ -98,7 +98,10 @@ def train_on_go_class_string_search(X, y, model, go_class_index, **model_kwargs)
     """ A helper function to split data outside the main thread before training"""
     cols = list(range(10)) + [go_class_index * 2 + 10, go_class_index * 2 + 11]
     Xi = X[:, cols]
-    return model(Xi, y, go_class_index, random_state)
+    try:
+        return model(Xi, y, go_class_index, **model_kwargs)
+    except Exception as ex:
+        raise type(ex)(f"Error in model index {go_class_index}: {ex}") from ex
 
 
 class Predictor:
