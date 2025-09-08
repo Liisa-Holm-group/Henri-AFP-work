@@ -11,7 +11,8 @@ from diamond_search.utils.split_single_joblib_for_training import filter_data_an
     save_results
 from scipy.sparse import load_npz, vstack
 from pathlib import Path
-
+from Holm_AFP.optimization.config import  (DIAMOND_EXECUTABLE_PATH, DIAMOND_FILE_ROOT_DIR, STRING_LINKS_PATH,
+                                           STRING_ENRICHMENT_PATH, OBO_FILE_PATH, GROUND_TRUTH_PATH)
 from Holm_AFP import models
 from logging import getLogger
 import ia
@@ -65,30 +66,24 @@ def construct_data(optimization_settings: OptimizationSettings, obo_path: str,
     """ Construct CV data for training. NOTE: The ground truth .fasta files must be constructed before calling this function!"""
 
     # Get original data
-    root_dir = "/scratch/project_2008455/Max_temp/diamond_search"
-    diamond_result_path = f"{root_dir}/temp_files/string_search_results.tsv"
-    diamond_datafile_path = f"{root_dir}/string12.dmnd"
-    string_links_path = f"{root_dir}/../../STRING_v12/protein.sampled.links.detailed.v12.0.txt"
-    string_enrichment_terms_path = f"{root_dir}/data/go_data/protein.enrichment.BP.terms.v12.0.txt"
-    protein_sequence_file = f"{root_dir}/data/fasta/old_sequences.fasta"
-    diamond_path = f"{root_dir}/diamond"
+    diamond_result_path = f"{DIAMOND_FILE_ROOT_DIR}/temp_files/string_search_results.tsv"
+    diamond_datafile_path = f"{DIAMOND_FILE_ROOT_DIR}/string12.dmnd"
     prefix = "CV_old"
-    diamond_result_joblib_path = f"{root_dir}/temp_files/{prefix}_sequence_array.joblib"
-    propagated_diamond_joblib_path = f"{root_dir}/temp_files/{prefix}_propagated_sequence_array.joblib"
-    merged_joblib_file_path = f"{root_dir}/data/training_data/{prefix}_full.joblib"
-    output_dir = f"{root_dir}/data/training_data/split_CV/{prefix}_data_CV_split"
-    data_with_CV_indexes_path = f"{root_dir}/data/training_data/{prefix}_data_target_jobs"
+    diamond_result_joblib_path = f"{DIAMOND_FILE_ROOT_DIR}/temp_files/{prefix}_sequence_array.joblib"
+    propagated_diamond_joblib_path = f"{DIAMOND_FILE_ROOT_DIR}/temp_files/{prefix}_propagated_sequence_array.joblib"
+    merged_joblib_file_path = f"{DIAMOND_FILE_ROOT_DIR}/data/training_data/{prefix}_full.joblib"
+    output_dir = f"{DIAMOND_FILE_ROOT_DIR}/data/training_data/split_CV/{prefix}_data_CV_split"
+    data_with_CV_indexes_path = f"{DIAMOND_FILE_ROOT_DIR}/data/training_data/{prefix}_data_target_jobs"
 
     logger.info(f"Constructing {diamond_result_path}")
     sequence_data = get_string_neighbourhood_dataset(
-                                                     diamond_path=diamond_path,
-                                                     query_tsv_file=protein_sequence_file,
-                                                     string_links_path=string_links_path,
+                                                     diamond_path=DIAMOND_EXECUTABLE_PATH,
+                                                     query_tsv_file=STRING_ENRICHMENT_PATH,
+                                                     string_links_path=STRING_LINKS_PATH,
                                                      diamond_result_path=diamond_result_path,
                                                      diamond_datafile_path=diamond_datafile_path,
-                                                     target_go_terms=None,
                                                      number_of_hits=optimization_settings.number_of_hits,
-                                                     string_enrichment_terms_path=string_enrichment_terms_path,
+                                                     string_enrichment_terms_path=STRING_ENRICHMENT_PATH,
                                                      top_neighbour_count=optimization_settings.number_of_neighbours)
 
 
@@ -318,11 +313,11 @@ def predict_with_model(experiment_name: str, model_path:str, validation_data_dir
 
 def hyperparameter_run(optimization_settings: OptimizationSettings,
                        cv_joblib_path: str = "/scratch/project_2008455/group_optisplit/output_clusters.joblib",
-                       obo_file_path: str = "/scratch/project_2008455/Max_temp/diamond_search/data/go_data/go.obo",
-                       ground_truth_joblib_path: str = "/scratch/project_2008455/Max_temp/diamond_search/data/training_data/one_OBOs_with_upstr_BP_data.joblib"):
+                       obo_file_path: str = OBO_FILE_PATH,
+                       ground_truth_joblib_path: str = GROUND_TRUTH_PATH):
 
-    # CV_dirs = construct_data(optimization_settings=optimization_settings, obo_path=obo_file_path, cv_joblib_path=cv_joblib_path,
-    #                          ground_truth_joblib_path=ground_truth_joblib_path)
+    CV_dirs = construct_data(optimization_settings=optimization_settings, obo_path=obo_file_path, cv_joblib_path=cv_joblib_path,
+                             ground_truth_joblib_path=ground_truth_joblib_path)
 
     CV_dirs = ['/scratch/project_2008455/Max_temp/diamond_search/data/training_data/split_CV/CV_old_data_CV_split_2', '/scratch/project_2008455/Max_temp/diamond_search/data/training_data/split_CV/CV_old_data_CV_split_4', '/scratch/project_2008455/Max_temp/diamond_search/data/training_data/split_CV/CV_old_data_CV_split_0', '/scratch/project_2008455/Max_temp/diamond_search/data/training_data/split_CV/CV_old_data_CV_split_3', '/scratch/project_2008455/Max_temp/diamond_search/data/training_data/split_CV/CV_old_data_CV_split_1']
     CV_root_dir = Path(CV_dirs[0]).parent
