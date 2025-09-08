@@ -12,7 +12,9 @@ dependencies = [
     "cycler>=0.12.1",
     "cython>=3.1.2",
     "decorator>=5.2.1",
+    "diamond-search",
     "h5py>=3.14.0",
+    "information-accretion",
     "ipython>=9.4.0",
     "ipython-genutils>=0.2.0",
     "jedi>=0.19.2",
@@ -22,12 +24,16 @@ dependencies = [
     "matplotlib>=3.10.3",
     "networkx>=3.5",
     "numpy>=2.3.2",
+    "optuna>=4.5.0",
+    "optuna-dashboard>=0.19.0",
     "pandas>=2.3.1",
     "parso>=0.8.4",
     "pexpect>=4.9.0",
     "pickleshare>=0.7.5",
     "prompt-toolkit>=3.0.51",
+    "pronto>=2.7.0",
     "ptyprocess>=0.7.0",
+    "pydantic>=2.11.7",
     "pyflakes>=3.4.0",
     "pyfms>=0.4.0",
     "pygments>=2.19.2",
@@ -45,4 +51,6 @@ dependencies = [
 ]
 
 [tool.uv.sources]
+diamond-search = { git = "ssh://git@github.com/Liisa-Holm-group/diamond_search.git" }
 cafaeval = { git = "https://github.com/BioComputingUP/CAFA-evaluator.git" }
+information-accretion = { git = "ssh://git@github.com/maxvaisto/InformationAccretion", branch = "add_obsolete_parsing_key" }
