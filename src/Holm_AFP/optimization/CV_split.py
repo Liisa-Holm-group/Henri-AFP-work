@@ -11,8 +11,8 @@ from diamond_search.utils.split_single_joblib_for_training import filter_data_an
     save_results
 from scipy.sparse import load_npz, vstack
 from pathlib import Path
-from Holm_AFP.optimization.config import  (DIAMOND_EXECUTABLE_PATH, DIAMOND_FILE_ROOT_DIR, STRING_LINKS_PATH,
-                                           STRING_ENRICHMENT_PATH, OBO_FILE_PATH, GROUND_TRUTH_PATH)
+from Holm_AFP.optimization.config import  (CV_JOBLIB_PATH, DIAMOND_EXECUTABLE_PATH, DIAMOND_FILE_ROOT_DIR,
+                                           STRING_LINKS_PATH, STRING_ENRICHMENT_PATH, OBO_FILE_PATH, GROUND_TRUTH_PATH)
 from Holm_AFP import models
 from logging import getLogger
 import ia
@@ -312,7 +312,7 @@ def predict_with_model(experiment_name: str, model_path:str, validation_data_dir
 
 
 def hyperparameter_run(optimization_settings: OptimizationSettings,
-                       cv_joblib_path: str = "/scratch/project_2008455/group_optisplit/output_clusters.joblib",
+                       cv_joblib_path: str = CV_JOBLIB_PATH,
                        obo_file_path: str = OBO_FILE_PATH,
                        ground_truth_joblib_path: str = GROUND_TRUTH_PATH):
 
