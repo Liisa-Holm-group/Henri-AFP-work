@@ -2,7 +2,7 @@
 name = "Holm_AFP"
 version = "0.1.0"
 description = "AFP protein function framework"
-authors = ["Henri Tiittanen"]
+authors = [{name = "Henri Tiittanen"}]
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
