@@ -87,16 +87,17 @@ def predict(X, model, i):
     return prediction.reshape(-1, 1).round(2)
 
 
-def predict_on_go_class(X, model, go_class_index):
+def predict_on_go_class_string_search(X, model, go_class_index, number_of_meta_features: int, number_of_y_features: int):
     """ A helper function to split data outside the main thread before predicting"""
-    cols = list(range(10)) + [go_class_index * 2 + 10, go_class_index * 2 + 11]
+    cols = list(range(number_of_meta_features)) + [go_class_index * number_of_y_features + number_of_meta_features, go_class_index * number_of_y_features + number_of_meta_features + 1]
     Xi = X[:, cols]
     return predict(Xi, model, go_class_index)
 
 
-def train_on_go_class_string_search(X, y, model, go_class_index, return_dummy_if_y_is_uniform: bool = False, **model_kwargs):
+def train_on_go_class_string_search(X, y, model, go_class_index, number_of_meta_features: int, number_of_y_features: int, return_dummy_if_y_is_uniform: bool = False, **model_kwargs):
     """ A helper function to split data outside the main thread before training. Fallback to a constant binary predictor
     if the y data only contains a single value."""
+    cols = list(range(number_of_meta_features)) + [go_class_index * number_of_y_features + number_of_meta_features + i for i in range(number_of_y_features)]
     Xi = X[:, cols]
 
     if return_dummy_if_y_is_uniform:
@@ -113,7 +114,8 @@ def train_on_go_class_string_search(X, y, model, go_class_index, return_dummy_if
 class Predictor:
     """Predict all GO-classes using pretrained models."""
 
-    def __init__(self, name, model_path, go_class_names, te_feature_path, te_sequences, output_path, feature_names, h5=False, n_jobs=1):
+    def __init__(self, name, model_path, go_class_names, te_feature_path, te_sequences, output_path, feature_names, h5=False, n_jobs=1,
+                 number_of_meta_features: Optional[int] = None, number_of_y_features: Optional[int] = None,):
         self.name = name
         self.model_path = model_path
         self.te_feature_path = te_feature_path
@@ -123,14 +125,23 @@ class Predictor:
         self.n_jobs=n_jobs
         self.feature_names = feature_names
         self.h5 = h5
+        self.number_of_meta_features = number_of_meta_features
+        self.number_of_y_features = number_of_y_features
 
     def predict(self, X, models, n_jobs, feature_type = str):
         """Given sequence features X, predict prob for each go-class."""
 
         if feature_type == "string_search":
             parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
-            res = parallel(delayed(predict_on_go_class)
-                           (X, model, go_class_index) for go_class_index, model in enumerate(models))
+            res = parallel(
+                delayed(predict_on_go_class_string_search)(
+                    X=X,
+                    model=model,
+                    go_class_index=go_class_index,
+                    number_of_meta_features = self.number_of_meta_features,
+                    number_of_y_features = self.number_of_y_features,
+                )
+               for go_class_index, model in enumerate(models))
             predictions = np.hstack(res)
             assert predictions.shape[0] == X.shape[0] and predictions.shape[1] == len(models)
             return predictions
@@ -159,12 +170,16 @@ class Predictor:
                     # TODO: Why is this unused?
                     dset = f.create_dataset(str(i), shape=(predictions[0].shape), data=arr, compression='gzip', compression_opts=9)
         else:
-            pr.save_cafa_format(predictions, sequences, go_names, f'{self.output_path}/{self.name}_{feature_type}_predictions')
+            output_path = f'{self.output_path}/{self.name}_{feature_type}_predictions'
+            pr.save_cafa_format(predictions, sequences, go_names, output_path)
+            return output_path
 
 class ModelTrainer:
     """Train models for each GO-class on a given data"""
 
-    def __init__(self, name, model, go_class_names, tr_feature_path, tr_target_path, feature_names, output_path, h5=False, classes=None, random_state=None):
+    def __init__(self, name, model, go_class_names, tr_feature_path, tr_target_path, feature_names, output_path,
+                 h5=False, classes=None, random_state=None, number_of_meta_features: Optional[int] = None, number_of_y_features: Optional[int] = None,
+                 **model_training_kwargs):
         """Experiment: string name, go class model function, features and targets paths. output pah"""
         self.name = name
         self.model = model
@@ -177,6 +192,9 @@ class ModelTrainer:
         self.h5 = h5
         self.classes = classes
         self.random_state = random_state
+        self.number_of_meta_features = number_of_meta_features
+        self.number_of_y_features = number_of_y_features
+        self.model_training_kwargs = model_training_kwargs
 
     def train_models(self, n_jobs: int, feature_type: str):
 
@@ -196,12 +214,15 @@ class ModelTrainer:
             parallel = Parallel(n_jobs=n_jobs, backend='multiprocessing')
             print('training models')
             models = parallel(
-                delayed(train_on_go_class)(
+                delayed(train_on_go_class_string_search)(
                     X=X,
                     y=y,
                     model=self.model,
                     random_state=self.random_state,
                     go_class_index=go_class_index,
+                    number_of_meta_features=self.number_of_meta_features,
+                    number_of_y_features=self.number_of_y_features,
+                    **self.model_training_kwargs
                 )
                 for go_class_index in range(y.shape[1])
             )
