@@ -201,6 +201,8 @@ class ModelTrainer:
         print('loading matrices')
 
         if feature_type == "string_search":
+            if self.number_of_meta_features is None or self.number_of_y_features is None:
+                raise ValueError("Number of meta features and y features must be specified.")
             X = sp.load_npz(self.tr_feature_path).tocsr()
 
             y = sp.load_npz(self.tr_target_path).tocsr()
