@@ -16,11 +16,17 @@ This package contains three files:
 # Install dependencies
 pip install numpy scipy scikit-learn h5py
 
-# Run the pipeline (default: e-value preprocessing)
-python ips_feature_pipeline.py /path/to/ips_directory output.h5
+# Process directory (all .out files, automatically excludes README)
+python ips_feature_pipeline.py --input-dir /path/to/ips_output output.h5
 
-# Run with different preprocessing
-python ips_feature_pipeline.py /path/to/ips_directory output.h5 --preprocessing counts
+# Process with custom pattern (e.g., EBI_GO*.out)
+python ips_feature_pipeline.py --input-dir /path/to/ips_output --pattern "EBI_GO*.out" output.h5
+
+# Process single file
+python ips_feature_pipeline.py --input-file protein.out output.h5
+
+# Different preprocessing method
+python ips_feature_pipeline.py --input-dir /path/to/ips_output output.h5 --preprocessing counts
 
 # View examples and test output
 python example_usage.py output.h5
@@ -51,15 +57,50 @@ The pipeline processes InterProScan output files and generates:
 
 ## 📥 Input Requirements
 
-**Directory structure:**
-```
-ips_directory/
-├── protein_batch1.tsv
-├── protein_batch2.tsv
-└── protein_batch3.tsv
+**Two Input Modes:**
+
+### Mode 1: Directory with Pattern Matching (Recommended)
+
+Process multiple IPS output files from a directory:
+
+```bash
+python ips_feature_pipeline.py --input-dir /data/ips_output output.h5
 ```
 
-**File format:** InterProScan TSV output with columns:
+**Default behavior:**
+- Searches for files matching pattern: `*.out`
+- Automatically excludes: `README*`
+- Processes files in alphabetical order
+
+**Custom patterns:**
+```bash
+# Match specific prefix
+python ips_feature_pipeline.py --input-dir /data/ips_output --pattern "EBI_GO*.out" output.h5
+
+# Multiple exclusions
+python ips_feature_pipeline.py --input-dir /data/ips_output --exclude "README*" "*.bak" "*.tmp" output.h5
+```
+
+**Example directory:**
+```
+ips_output/
+├── EBI_GO_no_preds_1.IPScan.out   ✓ Processed
+├── EBI_GO_no_preds_2.IPScan.out   ✓ Processed
+├── EBI_GO_no_preds_3.IPScan.out   ✓ Processed
+├── ...
+├── EBI_GO_no_preds_14.IPScan.out  ✓ Processed
+└── README                         ✗ Excluded
+```
+
+### Mode 2: Single File
+
+Process a single IPS output file:
+
+```bash
+python ips_feature_pipeline.py --input-file /data/protein.out output.h5
+```
+
+**File Format Requirements (Both Modes):**
 - Column 0: Protein ID (sp|P12345|NAME format supported)
 - Column 2: Protein length
 - Column 3: InterPro/Pfam ID
@@ -194,13 +235,52 @@ with h5py.File('ips_features.h5', 'r') as f:
 ```bash
 python ips_feature_pipeline.py --help
 
-positional arguments:
-  ips_dir              Directory containing InterProScan TSV files
+required arguments:
+  --input-dir DIR      Directory containing IPS files (with pattern matching)
+     OR
+  --input-file FILE    Single IPS file to process
+  
   output               Output HDF5 file path
 
 optional arguments:
   --preprocessing {binary,e-value,counts,location,location_b,clusters}
                        Preprocessing method (default: e-value)
+  
+  --pattern PATTERN    File pattern for matching (default: *.out)
+                       Only used with --input-dir
+                       Supports wildcards: *, ?, [abc], etc.
+                       Examples: "*.out", "EBI_GO*.out", "batch[1-5].tsv"
+  
+  --exclude PATTERN [PATTERN ...]
+                       Patterns to exclude (default: README*)
+                       Examples: --exclude "README*" "*.bak" "*.tmp"
+  
+  --quiet              Suppress progress messages
+```
+
+**Examples:**
+
+```bash
+# Standard usage - directory with all .out files
+python ips_feature_pipeline.py --input-dir /data/ips_output output.h5
+
+# Custom pattern to select specific files
+python ips_feature_pipeline.py \
+    --input-dir /data/ips_output \
+    --pattern "EBI_GO_no_preds_*.out" \
+    output.h5
+
+# Single file processing
+python ips_feature_pipeline.py \
+    --input-file /data/single_protein.out \
+    output.h5
+
+# With different preprocessing and custom exclusions
+python ips_feature_pipeline.py \
+    --input-dir /data/ips_output \
+    --preprocessing counts \
+    --exclude "README*" "test_*" "*.backup" \
+    output.h5
 ```
 
 ## 🎓 Understanding Preprocessing Methods
@@ -330,5 +410,5 @@ If you use this pipeline, please cite:
 
 **Version:** 1.0  
 **Date:** 2026-01-28  
-**Author:** Petri Toronen (University of Helsinki)  
+**Author:** Generated for Henri-AFP Project  
 **License:** Same as Henri-AFP project

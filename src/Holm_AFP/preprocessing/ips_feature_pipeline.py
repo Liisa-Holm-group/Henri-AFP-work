@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-InterProScan Feature Processing Pipeline
+InterProScan Feature Processing Pipeline (v2)
 
 This module processes InterProScan output files and generates feature matrices
-with multiple preprocessing options. Outputs are saved in HDF5 format with
-comprehensive metadata and statistics.
+with multiple preprocessing options. Supports both single files and directories
+with pattern matching. Outputs are saved in HDF5 format with comprehensive
+metadata and statistics.
 
 Author: Generated for Henri-AFP Project
-Date: 2026-01-28
+Date: 2026-01-29
+Version: 2.0
 """
 
 import os
@@ -27,26 +29,166 @@ from sklearn.preprocessing import MultiLabelBinarizer
 
 
 # ============================================================================
-# CORE PARSING FUNCTIONS (from data_processing.py)
+# FILE DISCOVERY AND VALIDATION
 # ============================================================================
 
-def read_file(path, function, *args, header=False, header_len=1):
-    """Read and process generic feature files."""
-    with open(path) as f:
-        if not header:
-            header_len = 0
-        for line_num, line in enumerate(f):
-            if line_num < header_len:
-                continue
-            try:
-                function(line, *args)
-            except (IndexError, ValueError) as e:
-                # Skip malformed lines
-                print(f"Warning: Skipping malformed line {line_num + 1} in {path}: {e}")
-                continue
+def find_ips_files(input_source, pattern='*.out', exclude_patterns=None, 
+                   is_single_file=False, verbose=True):
+    """
+    Find IPS files to process.
+    
+    Parameters
+    ----------
+    input_source : Path
+        Directory containing IPS files OR single file path
+    pattern : str
+        Glob pattern for matching files (only if is_single_file=False)
+    exclude_patterns : list
+        Patterns to exclude (e.g., ['README*'])
+    is_single_file : bool
+        If True, treat input_source as a single file
+    verbose : bool
+        Print discovery information
+        
+    Returns
+    -------
+    list of Path
+        Sorted list of IPS files to process
+        
+    Raises
+    ------
+    ValueError
+        If no suitable files are found
+    FileNotFoundError
+        If input path doesn't exist
+    """
+    exclude_patterns = exclude_patterns or ['README*']
+    
+    if is_single_file:
+        # Single file mode
+        if not input_source.exists():
+            raise FileNotFoundError(f"Input file not found: {input_source}")
+        if not input_source.is_file():
+            raise ValueError(f"Input path is not a file: {input_source}")
+        
+        if verbose:
+            print(f"Processing single file: {input_source}")
+        
+        return [input_source]
+    
+    else:
+        # Directory mode
+        if not input_source.exists():
+            raise FileNotFoundError(f"Input directory not found: {input_source}")
+        if not input_source.is_dir():
+            raise ValueError(f"Input path is not a directory: {input_source}")
+        
+        if verbose:
+            print(f"Searching for IPS files in: {input_source}")
+            print(f"  Pattern: {pattern}")
+            print(f"  Exclude: {', '.join(exclude_patterns)}")
+        
+        # Find files matching pattern
+        all_files = sorted(input_source.glob(pattern))
+        
+        if verbose:
+            print(f"  Found {len(all_files)} files matching pattern")
+        
+        # Filter out excluded files
+        filtered_files = []
+        excluded_files = []
+        
+        for file_path in all_files:
+            # Check if file matches any exclude pattern
+            excluded = False
+            for exclude_pattern in exclude_patterns:
+                if file_path.match(exclude_pattern):
+                    excluded = True
+                    excluded_files.append(file_path.name)
+                    break
+            
+            if not excluded:
+                filtered_files.append(file_path)
+        
+        if verbose and excluded_files:
+            print(f"  Excluded {len(excluded_files)} files: {', '.join(excluded_files[:5])}")
+            if len(excluded_files) > 5:
+                print(f"    ... and {len(excluded_files) - 5} more")
+        
+        # Validate we found files
+        if not filtered_files:
+            raise ValueError(
+                f"No IPS files found in {input_source}\n"
+                f"  Pattern: {pattern}\n"
+                f"  Exclude: {', '.join(exclude_patterns)}\n"
+                f"  Make sure files match the pattern and are not excluded."
+            )
+        
+        if verbose:
+            print(f"  Will process {len(filtered_files)} files:")
+            for i, f in enumerate(filtered_files[:10], 1):
+                print(f"    {i}. {f.name}")
+            if len(filtered_files) > 10:
+                print(f"    ... and {len(filtered_files) - 10} more")
+        
+        return filtered_files
 
 
-def process_ipr_line2(line, data):
+# ============================================================================
+# CORE PARSING FUNCTIONS
+# ============================================================================
+
+def validate_ips_line(fields, filepath, line_num):
+    """
+    Validate that an IPS line has the required fields.
+    
+    Parameters
+    ----------
+    fields : list
+        Split line fields
+    filepath : Path
+        Source file for error reporting
+    line_num : int
+        Line number for error reporting
+        
+    Raises
+    ------
+    ValueError
+        If line format is invalid
+    """
+    required_fields = {
+        0: "Protein ID",
+        2: "Protein length",
+        3: "InterPro/Pfam ID",
+        4: "Feature name",
+        6: "Start position",
+        7: "Stop position",
+        8: "E-value"
+    }
+    
+    for idx, name in required_fields.items():
+        if idx >= len(fields):
+            raise ValueError(
+                f"Invalid IPS format in {filepath.name}, line {line_num}:\n"
+                f"  Missing field {idx} ({name})\n"
+                f"  Expected at least 9 tab-separated fields, found {len(fields)}\n"
+                f"  Line content: {' '.join(fields[:50])}"
+            )
+    
+    # Validate numeric fields
+    try:
+        int(fields[2])  # length
+        int(fields[6])  # start
+        int(fields[7])  # stop
+    except ValueError as e:
+        raise ValueError(
+            f"Invalid IPS format in {filepath.name}, line {line_num}:\n"
+            f"  Non-numeric value in position field: {e}\n"
+            f"  Fields 2,6,7 must be integers (length, start, stop)"
+        )
+
+
+def process_ipr_line2(line, data, filepath, line_num):
     """Extract contents of an IPS line and store them to a dict.
     
     Parses IPS TSV format and extracts:
@@ -56,14 +198,36 @@ def process_ipr_line2(line, data):
     - Start/stop positions
     - Protein length
     - Cluster information
+    
+    Parameters
+    ----------
+    line : str
+        Line from IPS file
+    data : dict
+        Dictionary to store parsed data
+    filepath : Path
+        Source file (for error messages)
+    line_num : int
+        Line number (for error messages)
+        
+    Raises
+    ------
+    ValueError
+        If line format is invalid
     """
     fields = line.split('\t')
+    
+    # Validate format
+    validate_ips_line(fields, filepath, line_num)
+    
+    # Parse fields
     name = fields[0].split('|')[1] if '|' in fields[0] else fields[0]
     feature = f'{fields[3]}|{fields[4]}'
     e_value = fields[8]
     start = int(fields[6])
     stop = int(fields[7])
     length = int(fields[2])
+    
     try:
         cluster = fields[11].strip() if len(fields) > 11 else 'missing'
     except IndexError:
@@ -76,6 +240,43 @@ def process_ipr_line2(line, data):
         data[name][feature] = []
     
     data[name][feature].append((e_value, cluster, start, stop, length))
+
+
+def read_ips_file(filepath, data, verbose=True):
+    """
+    Read and parse a single IPS file.
+    
+    Parameters
+    ----------
+    filepath : Path
+        Path to IPS file
+    data : dict
+        Dictionary to accumulate parsed data
+    verbose : bool
+        Print progress
+        
+    Raises
+    ------
+    ValueError
+        If file format is invalid (stops processing)
+    """
+    if verbose:
+        print(f"    Reading: {filepath.name}")
+    
+    line_count = 0
+    with open(filepath, 'r') as f:
+        for line_num, line in enumerate(f, 1):
+            # Skip empty lines and comments
+            line = line.strip()
+            if not line or line.startswith('#'):
+                continue
+            
+            # Parse line - this will raise ValueError if format is invalid
+            process_ipr_line2(line, data, filepath, line_num)
+            line_count += 1
+    
+    if verbose:
+        print(f"      Processed {line_count} lines")
 
 
 def non_overlapping(feature_list, max_overlap=0.2):
@@ -99,9 +300,9 @@ def non_overlapping(feature_list, max_overlap=0.2):
     return features
 
 
-def calc_counts(feature_list):
+def calc_counts(feature_list, max_overlap=0.2):
     """Calculate number of non-overlapping occurrences."""
-    return len(non_overlapping(feature_list, 0.2))
+    return len(non_overlapping(feature_list, max_overlap))
 
 
 def calc_localisation(feature_list, max_tail_len=100):
@@ -137,13 +338,13 @@ def calc_localisation(feature_list, max_tail_len=100):
         else:
             return [0.0, 0.0, 0.0]
     except (ZeroDivisionError, ValueError):
-        return [1.0, 1.0, 1.0]  # For edge cases like length 1 sequences
+        return [1.0, 1.0, 1.0]
 
 
 def calc_center_position(feature_list):
     """Calculate relative center position (0-1) of the strongest feature."""
     if not feature_list:
-        return 0.5  # Default to middle
+        return 0.5
     
     # Find strongest (lowest e-value)
     strongest = min(feature_list, key=lambda x: float(x[0]) if x[0] != '-' else float('inf'))
@@ -159,40 +360,57 @@ def calc_center_position(feature_list):
     return center / length
 
 
-def process_ipr_data(ipr_dir):
-    """Read IPS data files and process features.
+def process_ipr_data(ips_files, verbose=True):
+    """
+    Read IPS data files and process features.
     
-    Returns a dictionary with structure:
-    data[protein][feature] = (cluster, count, max_e, loc_start, loc_middle, loc_end, center_pos)
+    Parameters
+    ----------
+    ips_files : list of Path
+        List of IPS files to process
+    verbose : bool
+        Print progress
+    
+    Returns
+    -------
+    dict
+        data[protein][feature] = (cluster, count, max_e, loc_start, loc_middle, 
+                                   loc_end, center_pos)
+    
+    Raises
+    ------
+    ValueError
+        If any file has invalid format
     """
     data = {}
     
-    # Read all TSV files in directory
-    ipr_path = Path(ipr_dir)
-    if not ipr_path.exists():
-        raise ValueError(f"IPS directory not found: {ipr_dir}")
+    if verbose:
+        print(f"\n  Step 1: Parsing {len(ips_files)} IPS files")
     
-    tsv_files = list(ipr_path.glob('*.tsv')) + list(ipr_path.glob('*.txt'))
-    
-    if not tsv_files:
-        raise ValueError(f"No TSV/TXT files found in {ipr_dir}")
-    
-    print(f"Found {len(tsv_files)} IPS files to process")
-    
-    for file_path in tsv_files:
-        print(f"  Processing {file_path.name}...")
-        read_file(str(file_path), process_ipr_line2, data, header=False)
+    # Read all files
+    for i, file_path in enumerate(ips_files, 1):
+        if verbose:
+            print(f"  File {i}/{len(ips_files)}:")
+        
+        # This will raise ValueError if format is invalid
+        read_ips_file(file_path, data, verbose=verbose)
     
     # Calculate derived features
-    print("Calculating counts and localizations...")
-    for protein_id, features in data.items():
+    if verbose:
+        print(f"\n  Step 2: Calculating counts and localizations...")
+    
+    n_proteins = len(data)
+    for protein_idx, (protein_id, features) in enumerate(data.items(), 1):
+        if verbose and protein_idx % 10000 == 0:
+            print(f"    Processed {protein_idx:,}/{n_proteins:,} proteins...")
+        
         for feature_id, feature_list in features.items():
             count = calc_counts(feature_list)
             
             # Get strongest e-value
             max_e = max(feature_list, key=lambda x: float(x[0]) if x[0] != '-' else 0)[0]
             
-            # Get cluster (from first occurrence, they should all be the same)
+            # Get cluster
             cluster = feature_list[0][1]
             
             # Calculate localization
@@ -211,6 +429,9 @@ def process_ipr_data(ipr_dir):
                 localisation[2],   # 5: end proportion
                 center_pos         # 6: center position
             )
+    
+    if verbose:
+        print(f"    ✓ Processed all {n_proteins:,} proteins")
     
     return data
 
@@ -231,12 +452,7 @@ def transform_features(sequences, features, empty_structure):
 
 
 def process_basic_features(ipr_list):
-    """Basic processing: e-values and binary features.
-    
-    Returns:
-    - e_values: list of dicts {feature: -log(e_value)}
-    - binary: list of sets {feature} for features without e-values
-    """
+    """Basic processing: e-values and binary features."""
     e_values = []
     binary = []
     
@@ -250,7 +466,7 @@ def process_basic_features(ipr_list):
             if max_e != '-':
                 float_val = float(max_e)
                 if float_val == 0:
-                    float_val = 7.5e-305  # Minimum value to avoid log(0)
+                    float_val = 7.5e-305
                 e_dict[key] = -np.log(float_val)
             else:
                 bin_set.add(key)
@@ -262,11 +478,7 @@ def process_basic_features(ipr_list):
 
 
 def process_cluster_features(ipr_list):
-    """Process cluster information.
-    
-    Returns list of dicts {cluster: max_e_value}
-    For each cluster, keep the strongest signal from all features linked to it.
-    """
+    """Process cluster information."""
     clusters = []
     
     for item in ipr_list:
@@ -282,7 +494,6 @@ def process_cluster_features(ipr_list):
                     float_val = 7.5e-305
                 e_val_transformed = -np.log(float_val)
                 
-                # Keep strongest (highest -log(e_value)) for each cluster
                 if cluster not in cluster_dict:
                     cluster_dict[cluster] = e_val_transformed
                 else:
@@ -294,26 +505,20 @@ def process_cluster_features(ipr_list):
 
 
 def process_count_features(ipr_list):
-    """Process count information.
-    
-    Returns list of dicts {feature: count}
-    """
+    """Process count information."""
     counts = []
     
     for item in ipr_list:
         count_dict = {}
         for key, values in item.items():
-            count_dict[key] = values[1]  # count is at index 1
+            count_dict[key] = values[1]
         counts.append(count_dict)
     
     return counts
 
 
 def process_location_features(ipr_list):
-    """Process location information (3-part split).
-    
-    Returns 3 lists of dicts for start, middle, end proportions
-    """
+    """Process location information (3-part split)."""
     start_locs = []
     middle_locs = []
     end_locs = []
@@ -324,9 +529,9 @@ def process_location_features(ipr_list):
         end_dict = {}
         
         for key, values in item.items():
-            start_dict[key] = values[3]   # start proportion
-            middle_dict[key] = values[4]  # middle proportion
-            end_dict[key] = values[5]     # end proportion
+            start_dict[key] = values[3]
+            middle_dict[key] = values[4]
+            end_dict[key] = values[5]
         
         start_locs.append(start_dict)
         middle_locs.append(middle_dict)
@@ -336,16 +541,13 @@ def process_location_features(ipr_list):
 
 
 def process_location_b_features(ipr_list):
-    """Process location B: relative center position.
-    
-    Returns list of dicts {feature: center_position}
-    """
+    """Process location B: relative center position."""
     positions = []
     
     for item in ipr_list:
         pos_dict = {}
         for key, values in item.items():
-            pos_dict[key] = values[6]  # center position
+            pos_dict[key] = values[6]
         positions.append(pos_dict)
     
     return positions
@@ -355,18 +557,21 @@ def process_location_b_features(ipr_list):
 # MATRIX CONSTRUCTION
 # ============================================================================
 
-def build_feature_matrix(ipr_dir, preprocessing='e-value'):
-    """Build sparse feature matrix from IPS data.
+def build_feature_matrix(ips_files, preprocessing='e-value', verbose=True):
+    """
+    Build sparse feature matrix from IPS data.
     
-    Parameters:
-    -----------
-    ipr_dir : str
-        Directory containing IPS TSV files
+    Parameters
+    ----------
+    ips_files : list of Path
+        List of IPS files to process
     preprocessing : str
         One of: 'binary', 'e-value', 'counts', 'location', 'location_b', 'clusters'
+    verbose : bool
+        Print progress
     
-    Returns:
-    --------
+    Returns
+    -------
     matrix : scipy.sparse.csr_matrix
         Feature matrix (n_proteins x n_features)
     feature_names : list
@@ -375,26 +580,44 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
         Protein IDs
     stats : dict
         Statistics about the processing
+    input_files : list
+        List of processed file paths (for provenance)
+        
+    Raises
+    ------
+    ValueError
+        If file format is invalid or preprocessing method is unknown
     """
-    print(f"\n{'='*70}")
-    print(f"Starting IPS Feature Processing")
-    print(f"{'='*70}")
-    print(f"Input directory: {ipr_dir}")
-    print(f"Preprocessing mode: {preprocessing}")
-    print(f"{'='*70}\n")
+    if verbose:
+        print(f"\n{'='*70}")
+        print(f"IPS Feature Processing")
+        print(f"{'='*70}")
+        print(f"Input files: {len(ips_files)}")
+        print(f"Preprocessing: {preprocessing}")
+        print(f"{'='*70}")
     
     start_time = time.time()
     
-    # Parse IPS data
-    print("Step 1: Parsing IPS files...")
+    # Parse IPS data - this will raise ValueError if format is invalid
     parse_start = time.time()
-    ipr_data = process_ipr_data(ipr_dir)
+    try:
+        ipr_data = process_ipr_data(ips_files, verbose=verbose)
+    except ValueError as e:
+        print(f"\n{'='*70}")
+        print(f"ERROR: Invalid IPS file format")
+        print(f"{'='*70}")
+        raise
+    
     protein_names = sorted(ipr_data.keys())
     parse_time = time.time() - parse_start
-    print(f"  ✓ Parsed {len(protein_names)} proteins in {parse_time:.2f}s")
+    
+    if verbose:
+        print(f"  ✓ Parsed {len(protein_names):,} proteins in {parse_time:.2f}s")
     
     # Transform to list format
-    print("\nStep 2: Transforming features...")
+    if verbose:
+        print(f"\n  Step 3: Transforming features...")
+    
     transform_start = time.time()
     ipr_list = transform_features(protein_names, ipr_data, dict)
     
@@ -403,26 +626,26 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
     for protein_features in ipr_list:
         all_features.update(protein_features.keys())
     n_unique_ips_features = len(all_features)
-    print(f"  ✓ Found {n_unique_ips_features} unique IPS features")
+    
+    if verbose:
+        print(f"  ✓ Found {n_unique_ips_features:,} unique IPS features")
     
     transform_time = time.time() - transform_start
     
     # Build matrix based on preprocessing type
-    print(f"\nStep 3: Building feature matrix (mode: {preprocessing})...")
+    if verbose:
+        print(f"\n  Step 4: Building feature matrix (mode: {preprocessing})...")
+    
     matrix_start = time.time()
     
     if preprocessing == 'binary':
-        # Binary encoding only
         e_values, binary = process_basic_features(ipr_list)
-        
         binarizer = MultiLabelBinarizer(sparse_output=True)
         matrix = binarizer.fit_transform(binary)
         feature_names = ['ipscan_binary_' + name for name in binarizer.classes_]
     
     elif preprocessing == 'e-value':
-        # E-values + binary (default)
         e_values, binary = process_basic_features(ipr_list)
-        
         e_vectorizer = DictVectorizer()
         binarizer = MultiLabelBinarizer(sparse_output=True)
         
@@ -434,7 +657,6 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
                         ['ipscan_binary_' + name for name in binarizer.classes_])
     
     elif preprocessing == 'counts':
-        # E-values + binary + counts
         e_values, binary = process_basic_features(ipr_list)
         counts = process_count_features(ipr_list)
         
@@ -452,7 +674,6 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
                         ['ipscan_count_' + name for name in c_vectorizer.feature_names_])
     
     elif preprocessing == 'location':
-        # E-values + binary + location (3-part split) + base score
         e_values, binary = process_basic_features(ipr_list)
         start_locs, middle_locs, end_locs = process_location_features(ipr_list)
         
@@ -476,7 +697,6 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
                         ['ipscan_loc_end_' + name for name in e_loc_vectorizer.feature_names_])
     
     elif preprocessing == 'location_b':
-        # E-values + binary + center position
         e_values, binary = process_basic_features(ipr_list)
         positions = process_location_b_features(ipr_list)
         
@@ -494,7 +714,6 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
                         ['ipscan_center_pos_' + name for name in p_vectorizer.feature_names_])
     
     elif preprocessing == 'clusters':
-        # E-values + binary + clusters
         e_values, binary = process_basic_features(ipr_list)
         clusters = process_cluster_features(ipr_list)
         
@@ -534,39 +753,37 @@ def build_feature_matrix(ipr_dir, preprocessing='e-value'):
         'transform_time_sec': transform_time,
         'matrix_build_time_sec': matrix_time,
         'total_time_sec': total_time,
-        'timestamp': datetime.now().isoformat()
+        'timestamp': datetime.now().isoformat(),
+        'n_input_files': len(ips_files)
     }
     
-    print(f"  ✓ Built matrix: {matrix.shape[0]} x {matrix.shape[1]}")
-    print(f"  ✓ Non-zero values: {n_nonzero:,} ({(1-sparsity)*100:.2f}% dense)")
-    print(f"  ✓ Matrix construction completed in {matrix_time:.2f}s")
-    print(f"\n{'='*70}")
-    print(f"Total processing time: {total_time:.2f}s")
-    print(f"{'='*70}\n")
+    if verbose:
+        print(f"  ✓ Built matrix: {matrix.shape[0]:,} × {matrix.shape[1]:,}")
+        print(f"  ✓ Non-zero values: {n_nonzero:,} ({(1-sparsity)*100:.2f}% dense)")
+        print(f"  ✓ Matrix construction: {matrix_time:.2f}s")
+        print(f"\n{'='*70}")
+        print(f"Total processing time: {total_time:.2f}s")
+        print(f"{'='*70}\n")
     
-    return matrix, feature_names, protein_names, stats
+    # Store input files for provenance
+    input_files = [str(f) for f in ips_files]
+    
+    return matrix, feature_names, protein_names, stats, input_files
 
 
 # ============================================================================
 # HDF5 OUTPUT
 # ============================================================================
 
-def save_to_hdf5(output_path, matrix, feature_names, protein_names, stats, ipr_dir, preprocessing):
-    """Save feature matrix and metadata to HDF5 file.
-    
-    HDF5 Structure:
-    ---------------
-    /features/csr/data       - CSR data array (float32)
-    /features/csr/indices    - CSR indices array (int32)
-    /features/csr/indptr     - CSR indptr array (int32)
-    /feature_names           - Feature name strings
-    /protein_names           - Protein ID strings
-    /metadata/               - Processing metadata and stats
-    /readme                  - Human-readable description
-    """
+def save_to_hdf5(output_path, matrix, feature_names, protein_names, stats, 
+                 input_files, input_source, preprocessing):
+    """Save feature matrix and metadata to HDF5 file."""
     print(f"Saving to HDF5: {output_path}")
     
-    with h5py.File(output_path, 'w') as f:
+    # Convert to Path for name extraction
+    output_path = Path(output_path)
+    
+    with h5py.File(str(output_path), 'w') as f:
         # Create groups
         features_grp = f.create_group('features')
         csr_grp = features_grp.create_group('csr')
@@ -585,13 +802,17 @@ def save_to_hdf5(output_path, matrix, feature_names, protein_names, stats, ipr_d
         features_grp.attrs['dtype'] = 'float32'
         features_grp.attrs['format'] = 'csr'
         
-        # Save feature names (variable-length strings)
+        # Save feature names
         dt = h5py.string_dtype(encoding='utf-8')
         f.create_dataset('feature_names', data=np.array(feature_names, dtype=object),
                         dtype=dt, compression='gzip')
         
         # Save protein names
         f.create_dataset('protein_names', data=np.array(protein_names, dtype=object),
+                        dtype=dt, compression='gzip')
+        
+        # Save input files list
+        f.create_dataset('input_files', data=np.array(input_files, dtype=object),
                         dtype=dt, compression='gzip')
         
         # Save metadata and statistics
@@ -601,7 +822,7 @@ def save_to_hdf5(output_path, matrix, feature_names, protein_names, stats, ipr_d
             else:
                 metadata_grp.attrs[key] = value
         
-        metadata_grp.attrs['input_directory'] = str(ipr_dir)
+        metadata_grp.attrs['input_source'] = str(input_source)
         metadata_grp.attrs['preprocessing_mode'] = preprocessing
         metadata_grp.attrs['creation_timestamp'] = datetime.now().isoformat()
         
@@ -614,7 +835,8 @@ GENERAL INFORMATION
 -------------------
 Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 Preprocessing Mode: {preprocessing}
-Input Directory: {ipr_dir}
+Input Source: {input_source}
+Number of Input Files: {len(input_files)}
 
 MATRIX DIMENSIONS
 -----------------
@@ -636,6 +858,11 @@ Transformation: {stats['transform_time_sec']:.2f}s
 Matrix construction: {stats['matrix_build_time_sec']:.2f}s
 Total: {stats['total_time_sec']:.2f}s
 
+INPUT FILES
+-----------
+{chr(10).join(f"  - {Path(f).name}" for f in input_files[:20])}
+{'  ... and ' + str(len(input_files) - 20) + ' more' if len(input_files) > 20 else ''}
+
 PREPROCESSING MODES
 -------------------
 - binary: Binary encoding (0/1) only
@@ -652,6 +879,7 @@ DATA STRUCTURE
 /features/csr/indptr    - Sparse matrix row pointers (int32)
 /feature_names          - Array of feature name strings
 /protein_names          - Array of protein ID strings
+/input_files            - List of processed input files
 /metadata/              - Processing statistics and parameters
 
 USAGE EXAMPLE (Python)
@@ -659,7 +887,7 @@ USAGE EXAMPLE (Python)
 import h5py
 import scipy.sparse as sp
 
-with h5py.File('{output_path}', 'r') as f:
+with h5py.File('{output_path.name}', 'r') as f:
     # Load sparse matrix
     data = f['features/csr/data'][:]
     indices = f['features/csr/indices'][:]
@@ -672,8 +900,8 @@ with h5py.File('{output_path}', 'r') as f:
     feature_names = f['feature_names'][:].astype(str)
     protein_names = f['protein_names'][:].astype(str)
     
-    # Load metadata
-    n_proteins = f['metadata'].attrs['n_proteins']
+    # Check input files
+    input_files = f['input_files'][:].astype(str)
 
 For more information, see the Henri-AFP project documentation.
 """
@@ -692,7 +920,7 @@ For more information, see the Henri-AFP project documentation.
 # SUMMARY REPORT
 # ============================================================================
 
-def generate_summary_report(output_path, stats, feature_names, protein_names):
+def generate_summary_report(output_path, stats, feature_names, protein_names, input_files):
     """Generate a detailed summary report in text format."""
     report_path = output_path.replace('.h5', '_summary.txt')
     
@@ -707,7 +935,16 @@ def generate_summary_report(output_path, stats, feature_names, protein_names):
         f.write("PROCESSING PARAMETERS\n")
         f.write("-"*80 + "\n")
         f.write(f"Preprocessing mode: {stats['preprocessing_mode']}\n")
-        f.write(f"Timestamp: {stats['timestamp']}\n\n")
+        f.write(f"Timestamp: {stats['timestamp']}\n")
+        f.write(f"Number of input files: {stats['n_input_files']}\n\n")
+        
+        f.write("INPUT FILES\n")
+        f.write("-"*80 + "\n")
+        for i, filepath in enumerate(input_files[:20], 1):
+            f.write(f"{i:3d}. {Path(filepath).name}\n")
+        if len(input_files) > 20:
+            f.write(f"... and {len(input_files) - 20} more files\n")
+        f.write("\n")
         
         f.write("DATA STATISTICS\n")
         f.write("-"*80 + "\n")
@@ -790,69 +1027,129 @@ Preprocessing modes:
   location_b  - E-values + binary + relative center position (0-1)
   clusters    - E-values + binary + IPS cluster aggregation
 
+Input modes:
+  --input-dir      Process multiple files from directory (with pattern matching)
+  --input-file     Process single file
+
 Example usage:
-  python ips_feature_pipeline.py /path/to/ips_dir output.h5
-  python ips_feature_pipeline.py /path/to/ips_dir output.h5 --preprocessing counts
+  # Process directory (all .out files, excluding README)
+  python ips_feature_pipeline.py --input-dir /path/to/ips_output output.h5
+  
+  # Process with custom pattern
+  python ips_feature_pipeline.py --input-dir /path/to/ips_output --pattern "EBI_GO*.out" output.h5
+  
+  # Process single file
+  python ips_feature_pipeline.py --input-file protein.out output.h5
+  
+  # Different preprocessing
+  python ips_feature_pipeline.py --input-dir /path/to/ips_output output.h5 --preprocessing counts
         """
     )
     
-    parser.add_argument('ips_dir', type=str,
-                       help='Directory containing InterProScan TSV files')
+    # Input group (mutually exclusive)
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument('--input-dir', type=str,
+                            help='Directory containing IPS files')
+    input_group.add_argument('--input-file', type=str,
+                            help='Single IPS file to process')
+    
     parser.add_argument('output', type=str,
                        help='Output HDF5 file path')
+    
     parser.add_argument('--preprocessing', type=str, default='e-value',
                        choices=['binary', 'e-value', 'counts', 'location', 'location_b', 'clusters'],
                        help='Preprocessing mode (default: e-value)')
     
+    parser.add_argument('--pattern', type=str, default='*.out',
+                       help='File pattern for matching (default: *.out, only used with --input-dir)')
+    
+    parser.add_argument('--exclude', type=str, nargs='+', default=['README*'],
+                       help='Patterns to exclude (default: README*)')
+    
+    parser.add_argument('--quiet', action='store_true',
+                       help='Suppress progress messages')
+    
     args = parser.parse_args()
     
-    # Validate input directory
-    if not os.path.isdir(args.ips_dir):
-        print(f"Error: Directory not found: {args.ips_dir}")
-        sys.exit(1)
+    verbose = not args.quiet
     
-    # Ensure output directory exists
-    output_dir = os.path.dirname(args.output)
-    if output_dir and not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+    # Determine input mode
+    if args.input_dir:
+        input_source = Path(args.input_dir)
+        is_single_file = False
+    else:
+        input_source = Path(args.input_file)
+        is_single_file = True
+    
+    # Validate and ensure output directory exists
+    output_path = Path(args.output)
+    if output_path.suffix != '.h5':
+        output_path = output_path.with_suffix('.h5')
+    
+    if output_path.parent != Path('.') and not output_path.parent.exists():
+        output_path.parent.mkdir(parents=True, exist_ok=True)
     
     try:
+        # Find IPS files
+        ips_files = find_ips_files(
+            input_source,
+            pattern=args.pattern,
+            exclude_patterns=args.exclude,
+            is_single_file=is_single_file,
+            verbose=verbose
+        )
+        
         # Build feature matrix
-        matrix, feature_names, protein_names, stats = build_feature_matrix(
-            args.ips_dir, 
-            args.preprocessing
+        matrix, feature_names, protein_names, stats, input_files = build_feature_matrix(
+            ips_files,
+            args.preprocessing,
+            verbose=verbose
         )
         
         # Save to HDF5
         save_to_hdf5(
-            args.output,
+            str(output_path),
             matrix,
             feature_names,
             protein_names,
             stats,
-            args.ips_dir,
+            input_files,
+            input_source,
             args.preprocessing
         )
         
         # Generate summary report
         report_path = generate_summary_report(
-            args.output,
+            str(output_path),
             stats,
             feature_names,
-            protein_names
+            protein_names,
+            input_files
         )
         
-        print("\n" + "="*70)
-        print("SUCCESS!")
-        print("="*70)
-        print(f"HDF5 file:      {args.output}")
-        print(f"Summary report: {report_path}")
-        print("="*70 + "\n")
+        if verbose:
+            print("\n" + "="*70)
+            print("SUCCESS!")
+            print("="*70)
+            print(f"HDF5 file:      {output_path}")
+            print(f"Summary report: {report_path}")
+            print("="*70 + "\n")
         
+    except (ValueError, FileNotFoundError) as e:
+        print(f"\n{'='*70}")
+        print(f"ERROR")
+        print(f"{'='*70}")
+        print(f"{e}")
+        print(f"{'='*70}\n")
+        sys.exit(1)
     except Exception as e:
-        print(f"\nERROR: {e}")
+        print(f"\n{'='*70}")
+        print(f"UNEXPECTED ERROR")
+        print(f"{'='*70}")
+        print(f"{e}")
         import traceback
         traceback.print_exc()
+        print(f"{'='*70}\n")
         sys.exit(1)
 
 
