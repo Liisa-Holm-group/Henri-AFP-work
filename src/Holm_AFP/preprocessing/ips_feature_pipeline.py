@@ -1,0 +1,860 @@
+#!/usr/bin/env python3
+"""
+InterProScan Feature Processing Pipeline
+
+This module processes InterProScan output files and generates feature matrices
+with multiple preprocessing options. Outputs are saved in HDF5 format with
+comprehensive metadata and statistics.
+
+Author: Generated for Henri-AFP Project
+Date: 2026-01-28
+"""
+
+import os
+import sys
+import time
+import argparse
+from datetime import datetime
+from pathlib import Path
+from collections import Counter
+import json
+
+import h5py
+import numpy as np
+import scipy.sparse as sp
+from sklearn.feature_extraction import DictVectorizer
+from sklearn.preprocessing import MultiLabelBinarizer
+
+
+# ============================================================================
+# CORE PARSING FUNCTIONS (from data_processing.py)
+# ============================================================================
+
+def read_file(path, function, *args, header=False, header_len=1):
+    """Read and process generic feature files."""
+    with open(path) as f:
+        if not header:
+            header_len = 0
+        for line_num, line in enumerate(f):
+            if line_num < header_len:
+                continue
+            try:
+                function(line, *args)
+            except (IndexError, ValueError) as e:
+                # Skip malformed lines
+                print(f"Warning: Skipping malformed line {line_num + 1} in {path}: {e}")
+                continue
+
+
+def process_ipr_line2(line, data):
+    """Extract contents of an IPS line and store them to a dict.
+    
+    Parses IPS TSV format and extracts:
+    - Protein ID
+    - Feature ID and name
+    - E-value
+    - Start/stop positions
+    - Protein length
+    - Cluster information
+    """
+    fields = line.split('\t')
+    name = fields[0].split('|')[1] if '|' in fields[0] else fields[0]
+    feature = f'{fields[3]}|{fields[4]}'
+    e_value = fields[8]
+    start = int(fields[6])
+    stop = int(fields[7])
+    length = int(fields[2])
+    try:
+        cluster = fields[11].strip() if len(fields) > 11 else 'missing'
+    except IndexError:
+        cluster = 'missing'
+    
+    if name not in data:
+        data[name] = {}
+    
+    if feature not in data[name]:
+        data[name][feature] = []
+    
+    data[name][feature].append((e_value, cluster, start, stop, length))
+
+
+def non_overlapping(feature_list, max_overlap=0.2):
+    """Extract occurrences of a feature where overlap is below max_overlap."""
+    from operator import itemgetter
+    
+    if not feature_list:
+        return []
+    
+    features = []
+    sorted_features = sorted(feature_list, key=itemgetter(2))  # Sort by start position
+    features.append(sorted_features[0])
+    j = 0
+    
+    for i in range(1, len(sorted_features)):
+        # Check if overlap is acceptable
+        if (1 - max_overlap) * sorted_features[j][3] < sorted_features[i][2]:
+            features.append(sorted_features[i])
+            j = i
+    
+    return features
+
+
+def calc_counts(feature_list):
+    """Calculate number of non-overlapping occurrences."""
+    return len(non_overlapping(feature_list, 0.2))
+
+
+def calc_localisation(feature_list, max_tail_len=100):
+    """Calculate proportions of feature in N-terminal, middle, C-terminal regions."""
+    no = non_overlapping(feature_list, 0.5)
+    if not no:
+        return [0.0, 0.0, 0.0]
+    
+    length = no[0][4]
+    result = [0.0, 0.0, 0.0]
+    
+    if length < 300:
+        max_tail_len = length // 3
+        start_region = set(range(max_tail_len))
+        middle_region = set(range(max_tail_len, 2 * max_tail_len))
+        end_region = set(range(2 * max_tail_len, length))
+    else:
+        start_region = set(range(max_tail_len))
+        middle_region = set(range(max_tail_len, length - max_tail_len))
+        end_region = set(range(length - max_tail_len, length))
+    
+    try:
+        for occurrence in no:
+            values = set(range(occurrence[2], occurrence[3]))
+            if len(values) > 0:
+                result[0] += len(values.intersection(start_region)) / len(values)
+                result[1] += len(values.intersection(middle_region)) / len(values)
+                result[2] += len(values.intersection(end_region)) / len(values)
+        
+        total = sum(result)
+        if total > 0:
+            return [r / total for r in result]
+        else:
+            return [0.0, 0.0, 0.0]
+    except (ZeroDivisionError, ValueError):
+        return [1.0, 1.0, 1.0]  # For edge cases like length 1 sequences
+
+
+def calc_center_position(feature_list):
+    """Calculate relative center position (0-1) of the strongest feature."""
+    if not feature_list:
+        return 0.5  # Default to middle
+    
+    # Find strongest (lowest e-value)
+    strongest = min(feature_list, key=lambda x: float(x[0]) if x[0] != '-' else float('inf'))
+    
+    start = strongest[2]
+    stop = strongest[3]
+    length = strongest[4]
+    
+    if length == 0:
+        return 0.5
+    
+    center = (start + stop) / 2
+    return center / length
+
+
+def process_ipr_data(ipr_dir):
+    """Read IPS data files and process features.
+    
+    Returns a dictionary with structure:
+    data[protein][feature] = (cluster, count, max_e, loc_start, loc_middle, loc_end, center_pos)
+    """
+    data = {}
+    
+    # Read all TSV files in directory
+    ipr_path = Path(ipr_dir)
+    if not ipr_path.exists():
+        raise ValueError(f"IPS directory not found: {ipr_dir}")
+    
+    tsv_files = list(ipr_path.glob('*.tsv')) + list(ipr_path.glob('*.txt'))
+    
+    if not tsv_files:
+        raise ValueError(f"No TSV/TXT files found in {ipr_dir}")
+    
+    print(f"Found {len(tsv_files)} IPS files to process")
+    
+    for file_path in tsv_files:
+        print(f"  Processing {file_path.name}...")
+        read_file(str(file_path), process_ipr_line2, data, header=False)
+    
+    # Calculate derived features
+    print("Calculating counts and localizations...")
+    for protein_id, features in data.items():
+        for feature_id, feature_list in features.items():
+            count = calc_counts(feature_list)
+            
+            # Get strongest e-value
+            max_e = max(feature_list, key=lambda x: float(x[0]) if x[0] != '-' else 0)[0]
+            
+            # Get cluster (from first occurrence, they should all be the same)
+            cluster = feature_list[0][1]
+            
+            # Calculate localization
+            localisation = calc_localisation(feature_list)
+            
+            # Calculate center position
+            center_pos = calc_center_position(feature_list)
+            
+            # Store processed data
+            data[protein_id][feature_id] = (
+                cluster,           # 0: cluster
+                count,             # 1: count
+                max_e,             # 2: max_e_value
+                localisation[0],   # 3: start proportion
+                localisation[1],   # 4: middle proportion
+                localisation[2],   # 5: end proportion
+                center_pos         # 6: center position
+            )
+    
+    return data
+
+
+# ============================================================================
+# FEATURE TRANSFORMATION FUNCTIONS
+# ============================================================================
+
+def transform_features(sequences, features, empty_structure):
+    """Extract features corresponding to sequences."""
+    new_features = []
+    for seq in sequences:
+        try:
+            new_features.append(features[seq])
+        except KeyError:
+            new_features.append(empty_structure())
+    return new_features
+
+
+def process_basic_features(ipr_list):
+    """Basic processing: e-values and binary features.
+    
+    Returns:
+    - e_values: list of dicts {feature: -log(e_value)}
+    - binary: list of sets {feature} for features without e-values
+    """
+    e_values = []
+    binary = []
+    
+    for item in ipr_list:
+        e_dict = {}
+        bin_set = set()
+        
+        for key, values in item.items():
+            max_e = values[2]  # E-value
+            
+            if max_e != '-':
+                float_val = float(max_e)
+                if float_val == 0:
+                    float_val = 7.5e-305  # Minimum value to avoid log(0)
+                e_dict[key] = -np.log(float_val)
+            else:
+                bin_set.add(key)
+        
+        e_values.append(e_dict)
+        binary.append(bin_set)
+    
+    return e_values, binary
+
+
+def process_cluster_features(ipr_list):
+    """Process cluster information.
+    
+    Returns list of dicts {cluster: max_e_value}
+    For each cluster, keep the strongest signal from all features linked to it.
+    """
+    clusters = []
+    
+    for item in ipr_list:
+        cluster_dict = {}
+        
+        for key, values in item.items():
+            cluster = values[0]
+            max_e = values[2]
+            
+            if cluster != 'missing' and max_e != '-':
+                float_val = float(max_e)
+                if float_val == 0:
+                    float_val = 7.5e-305
+                e_val_transformed = -np.log(float_val)
+                
+                # Keep strongest (highest -log(e_value)) for each cluster
+                if cluster not in cluster_dict:
+                    cluster_dict[cluster] = e_val_transformed
+                else:
+                    cluster_dict[cluster] = max(cluster_dict[cluster], e_val_transformed)
+        
+        clusters.append(cluster_dict)
+    
+    return clusters
+
+
+def process_count_features(ipr_list):
+    """Process count information.
+    
+    Returns list of dicts {feature: count}
+    """
+    counts = []
+    
+    for item in ipr_list:
+        count_dict = {}
+        for key, values in item.items():
+            count_dict[key] = values[1]  # count is at index 1
+        counts.append(count_dict)
+    
+    return counts
+
+
+def process_location_features(ipr_list):
+    """Process location information (3-part split).
+    
+    Returns 3 lists of dicts for start, middle, end proportions
+    """
+    start_locs = []
+    middle_locs = []
+    end_locs = []
+    
+    for item in ipr_list:
+        start_dict = {}
+        middle_dict = {}
+        end_dict = {}
+        
+        for key, values in item.items():
+            start_dict[key] = values[3]   # start proportion
+            middle_dict[key] = values[4]  # middle proportion
+            end_dict[key] = values[5]     # end proportion
+        
+        start_locs.append(start_dict)
+        middle_locs.append(middle_dict)
+        end_locs.append(end_dict)
+    
+    return start_locs, middle_locs, end_locs
+
+
+def process_location_b_features(ipr_list):
+    """Process location B: relative center position.
+    
+    Returns list of dicts {feature: center_position}
+    """
+    positions = []
+    
+    for item in ipr_list:
+        pos_dict = {}
+        for key, values in item.items():
+            pos_dict[key] = values[6]  # center position
+        positions.append(pos_dict)
+    
+    return positions
+
+
+# ============================================================================
+# MATRIX CONSTRUCTION
+# ============================================================================
+
+def build_feature_matrix(ipr_dir, preprocessing='e-value'):
+    """Build sparse feature matrix from IPS data.
+    
+    Parameters:
+    -----------
+    ipr_dir : str
+        Directory containing IPS TSV files
+    preprocessing : str
+        One of: 'binary', 'e-value', 'counts', 'location', 'location_b', 'clusters'
+    
+    Returns:
+    --------
+    matrix : scipy.sparse.csr_matrix
+        Feature matrix (n_proteins x n_features)
+    feature_names : list
+        Feature names
+    protein_names : list
+        Protein IDs
+    stats : dict
+        Statistics about the processing
+    """
+    print(f"\n{'='*70}")
+    print(f"Starting IPS Feature Processing")
+    print(f"{'='*70}")
+    print(f"Input directory: {ipr_dir}")
+    print(f"Preprocessing mode: {preprocessing}")
+    print(f"{'='*70}\n")
+    
+    start_time = time.time()
+    
+    # Parse IPS data
+    print("Step 1: Parsing IPS files...")
+    parse_start = time.time()
+    ipr_data = process_ipr_data(ipr_dir)
+    protein_names = sorted(ipr_data.keys())
+    parse_time = time.time() - parse_start
+    print(f"  ✓ Parsed {len(protein_names)} proteins in {parse_time:.2f}s")
+    
+    # Transform to list format
+    print("\nStep 2: Transforming features...")
+    transform_start = time.time()
+    ipr_list = transform_features(protein_names, ipr_data, dict)
+    
+    # Count unique IPS features
+    all_features = set()
+    for protein_features in ipr_list:
+        all_features.update(protein_features.keys())
+    n_unique_ips_features = len(all_features)
+    print(f"  ✓ Found {n_unique_ips_features} unique IPS features")
+    
+    transform_time = time.time() - transform_start
+    
+    # Build matrix based on preprocessing type
+    print(f"\nStep 3: Building feature matrix (mode: {preprocessing})...")
+    matrix_start = time.time()
+    
+    if preprocessing == 'binary':
+        # Binary encoding only
+        e_values, binary = process_basic_features(ipr_list)
+        
+        binarizer = MultiLabelBinarizer(sparse_output=True)
+        matrix = binarizer.fit_transform(binary)
+        feature_names = ['ipscan_binary_' + name for name in binarizer.classes_]
+    
+    elif preprocessing == 'e-value':
+        # E-values + binary (default)
+        e_values, binary = process_basic_features(ipr_list)
+        
+        e_vectorizer = DictVectorizer()
+        binarizer = MultiLabelBinarizer(sparse_output=True)
+        
+        e_matrix = e_vectorizer.fit_transform(e_values)
+        b_matrix = binarizer.fit_transform(binary)
+        
+        matrix = sp.hstack([e_matrix, b_matrix]).tocsr()
+        feature_names = (['ipscan_e_value_' + name for name in e_vectorizer.feature_names_] +
+                        ['ipscan_binary_' + name for name in binarizer.classes_])
+    
+    elif preprocessing == 'counts':
+        # E-values + binary + counts
+        e_values, binary = process_basic_features(ipr_list)
+        counts = process_count_features(ipr_list)
+        
+        e_vectorizer = DictVectorizer()
+        b_binarizer = MultiLabelBinarizer(sparse_output=True)
+        c_vectorizer = DictVectorizer()
+        
+        e_matrix = e_vectorizer.fit_transform(e_values)
+        b_matrix = b_binarizer.fit_transform(binary)
+        c_matrix = c_vectorizer.fit_transform(counts)
+        
+        matrix = sp.hstack([e_matrix, b_matrix, c_matrix]).tocsr()
+        feature_names = (['ipscan_e_value_' + name for name in e_vectorizer.feature_names_] +
+                        ['ipscan_binary_' + name for name in b_binarizer.classes_] +
+                        ['ipscan_count_' + name for name in c_vectorizer.feature_names_])
+    
+    elif preprocessing == 'location':
+        # E-values + binary + location (3-part split) + base score
+        e_values, binary = process_basic_features(ipr_list)
+        start_locs, middle_locs, end_locs = process_location_features(ipr_list)
+        
+        e_vectorizer = DictVectorizer()
+        b_binarizer = MultiLabelBinarizer(sparse_output=True)
+        s_vectorizer = DictVectorizer()
+        m_vectorizer = DictVectorizer()
+        e_loc_vectorizer = DictVectorizer()
+        
+        e_matrix = e_vectorizer.fit_transform(e_values)
+        b_matrix = b_binarizer.fit_transform(binary)
+        s_matrix = s_vectorizer.fit_transform(start_locs)
+        m_matrix = m_vectorizer.fit_transform(middle_locs)
+        e_loc_matrix = e_loc_vectorizer.fit_transform(end_locs)
+        
+        matrix = sp.hstack([e_matrix, b_matrix, s_matrix, m_matrix, e_loc_matrix]).tocsr()
+        feature_names = (['ipscan_e_value_' + name for name in e_vectorizer.feature_names_] +
+                        ['ipscan_binary_' + name for name in b_binarizer.classes_] +
+                        ['ipscan_loc_start_' + name for name in s_vectorizer.feature_names_] +
+                        ['ipscan_loc_middle_' + name for name in m_vectorizer.feature_names_] +
+                        ['ipscan_loc_end_' + name for name in e_loc_vectorizer.feature_names_])
+    
+    elif preprocessing == 'location_b':
+        # E-values + binary + center position
+        e_values, binary = process_basic_features(ipr_list)
+        positions = process_location_b_features(ipr_list)
+        
+        e_vectorizer = DictVectorizer()
+        b_binarizer = MultiLabelBinarizer(sparse_output=True)
+        p_vectorizer = DictVectorizer()
+        
+        e_matrix = e_vectorizer.fit_transform(e_values)
+        b_matrix = b_binarizer.fit_transform(binary)
+        p_matrix = p_vectorizer.fit_transform(positions)
+        
+        matrix = sp.hstack([e_matrix, b_matrix, p_matrix]).tocsr()
+        feature_names = (['ipscan_e_value_' + name for name in e_vectorizer.feature_names_] +
+                        ['ipscan_binary_' + name for name in b_binarizer.classes_] +
+                        ['ipscan_center_pos_' + name for name in p_vectorizer.feature_names_])
+    
+    elif preprocessing == 'clusters':
+        # E-values + binary + clusters
+        e_values, binary = process_basic_features(ipr_list)
+        clusters = process_cluster_features(ipr_list)
+        
+        e_vectorizer = DictVectorizer()
+        b_binarizer = MultiLabelBinarizer(sparse_output=True)
+        c_vectorizer = DictVectorizer()
+        
+        e_matrix = e_vectorizer.fit_transform(e_values)
+        b_matrix = b_binarizer.fit_transform(binary)
+        c_matrix = c_vectorizer.fit_transform(clusters)
+        
+        matrix = sp.hstack([e_matrix, b_matrix, c_matrix]).tocsr()
+        feature_names = (['ipscan_e_value_' + name for name in e_vectorizer.feature_names_] +
+                        ['ipscan_binary_' + name for name in b_binarizer.classes_] +
+                        ['ipscan_cluster_' + name for name in c_vectorizer.feature_names_])
+    
+    else:
+        raise ValueError(f"Unknown preprocessing mode: {preprocessing}. "
+                        f"Choose from: binary, e-value, counts, location, location_b, clusters")
+    
+    matrix_time = time.time() - matrix_start
+    total_time = time.time() - start_time
+    
+    # Compute statistics
+    n_nonzero = matrix.nnz
+    sparsity = 1.0 - (n_nonzero / (matrix.shape[0] * matrix.shape[1]))
+    
+    stats = {
+        'n_proteins': len(protein_names),
+        'n_unique_ips_features': n_unique_ips_features,
+        'n_resulting_features': len(feature_names),
+        'n_nonzero_values': n_nonzero,
+        'sparsity': sparsity,
+        'matrix_shape': matrix.shape,
+        'preprocessing_mode': preprocessing,
+        'parse_time_sec': parse_time,
+        'transform_time_sec': transform_time,
+        'matrix_build_time_sec': matrix_time,
+        'total_time_sec': total_time,
+        'timestamp': datetime.now().isoformat()
+    }
+    
+    print(f"  ✓ Built matrix: {matrix.shape[0]} x {matrix.shape[1]}")
+    print(f"  ✓ Non-zero values: {n_nonzero:,} ({(1-sparsity)*100:.2f}% dense)")
+    print(f"  ✓ Matrix construction completed in {matrix_time:.2f}s")
+    print(f"\n{'='*70}")
+    print(f"Total processing time: {total_time:.2f}s")
+    print(f"{'='*70}\n")
+    
+    return matrix, feature_names, protein_names, stats
+
+
+# ============================================================================
+# HDF5 OUTPUT
+# ============================================================================
+
+def save_to_hdf5(output_path, matrix, feature_names, protein_names, stats, ipr_dir, preprocessing):
+    """Save feature matrix and metadata to HDF5 file.
+    
+    HDF5 Structure:
+    ---------------
+    /features/csr/data       - CSR data array (float32)
+    /features/csr/indices    - CSR indices array (int32)
+    /features/csr/indptr     - CSR indptr array (int32)
+    /feature_names           - Feature name strings
+    /protein_names           - Protein ID strings
+    /metadata/               - Processing metadata and stats
+    /readme                  - Human-readable description
+    """
+    print(f"Saving to HDF5: {output_path}")
+    
+    with h5py.File(output_path, 'w') as f:
+        # Create groups
+        features_grp = f.create_group('features')
+        csr_grp = features_grp.create_group('csr')
+        metadata_grp = f.create_group('metadata')
+        
+        # Save CSR matrix components
+        csr_grp.create_dataset('data', data=matrix.data.astype(np.float32),
+                               compression='gzip', compression_opts=6)
+        csr_grp.create_dataset('indices', data=matrix.indices.astype(np.int32),
+                               compression='gzip', compression_opts=6)
+        csr_grp.create_dataset('indptr', data=matrix.indptr.astype(np.int32),
+                               compression='gzip', compression_opts=6)
+        
+        # Add matrix shape as attributes
+        features_grp.attrs['shape'] = matrix.shape
+        features_grp.attrs['dtype'] = 'float32'
+        features_grp.attrs['format'] = 'csr'
+        
+        # Save feature names (variable-length strings)
+        dt = h5py.string_dtype(encoding='utf-8')
+        f.create_dataset('feature_names', data=np.array(feature_names, dtype=object),
+                        dtype=dt, compression='gzip')
+        
+        # Save protein names
+        f.create_dataset('protein_names', data=np.array(protein_names, dtype=object),
+                        dtype=dt, compression='gzip')
+        
+        # Save metadata and statistics
+        for key, value in stats.items():
+            if isinstance(value, (list, tuple)):
+                metadata_grp.attrs[key] = str(value)
+            else:
+                metadata_grp.attrs[key] = value
+        
+        metadata_grp.attrs['input_directory'] = str(ipr_dir)
+        metadata_grp.attrs['preprocessing_mode'] = preprocessing
+        metadata_grp.attrs['creation_timestamp'] = datetime.now().isoformat()
+        
+        # Create README
+        readme_text = f"""
+InterProScan Feature Matrix
+===========================
+
+GENERAL INFORMATION
+-------------------
+Created: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+Preprocessing Mode: {preprocessing}
+Input Directory: {ipr_dir}
+
+MATRIX DIMENSIONS
+-----------------
+Proteins: {stats['n_proteins']:,}
+Features: {stats['n_resulting_features']:,}
+Non-zero values: {stats['n_nonzero_values']:,}
+Sparsity: {stats['sparsity']*100:.2f}%
+Matrix shape: {stats['matrix_shape']}
+
+FEATURE STATISTICS
+------------------
+Unique IPS features (raw): {stats['n_unique_ips_features']:,}
+Resulting features (processed): {stats['n_resulting_features']:,}
+
+PROCESSING TIME
+---------------
+Parsing: {stats['parse_time_sec']:.2f}s
+Transformation: {stats['transform_time_sec']:.2f}s
+Matrix construction: {stats['matrix_build_time_sec']:.2f}s
+Total: {stats['total_time_sec']:.2f}s
+
+PREPROCESSING MODES
+-------------------
+- binary: Binary encoding (0/1) only
+- e-value: E-values (-log transformed) + binary features
+- counts: E-values + binary + non-overlapping occurrence counts
+- location: E-values + binary + 3-part location split (N-term/middle/C-term)
+- location_b: E-values + binary + relative center position (0-1)
+- clusters: E-values + binary + IPS cluster aggregation
+
+DATA STRUCTURE
+--------------
+/features/csr/data      - Sparse matrix data (float32)
+/features/csr/indices   - Sparse matrix column indices (int32)
+/features/csr/indptr    - Sparse matrix row pointers (int32)
+/feature_names          - Array of feature name strings
+/protein_names          - Array of protein ID strings
+/metadata/              - Processing statistics and parameters
+
+USAGE EXAMPLE (Python)
+----------------------
+import h5py
+import scipy.sparse as sp
+
+with h5py.File('{output_path}', 'r') as f:
+    # Load sparse matrix
+    data = f['features/csr/data'][:]
+    indices = f['features/csr/indices'][:]
+    indptr = f['features/csr/indptr'][:]
+    shape = f['features'].attrs['shape']
+    
+    matrix = sp.csr_matrix((data, indices, indptr), shape=shape)
+    
+    # Load names
+    feature_names = f['feature_names'][:].astype(str)
+    protein_names = f['protein_names'][:].astype(str)
+    
+    # Load metadata
+    n_proteins = f['metadata'].attrs['n_proteins']
+
+For more information, see the Henri-AFP project documentation.
+"""
+        
+        f.create_dataset('readme', data=readme_text, dtype=h5py.string_dtype(encoding='utf-8'))
+    
+    print(f"  ✓ HDF5 file saved successfully")
+    
+    # Calculate file size
+    file_size = os.path.getsize(output_path)
+    size_mb = file_size / (1024 * 1024)
+    print(f"  ✓ File size: {size_mb:.2f} MB")
+
+
+# ============================================================================
+# SUMMARY REPORT
+# ============================================================================
+
+def generate_summary_report(output_path, stats, feature_names, protein_names):
+    """Generate a detailed summary report in text format."""
+    report_path = output_path.replace('.h5', '_summary.txt')
+    
+    with open(report_path, 'w') as f:
+        f.write("="*80 + "\n")
+        f.write("InterProScan Feature Processing Summary Report\n")
+        f.write("="*80 + "\n\n")
+        
+        f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Output file: {output_path}\n\n")
+        
+        f.write("PROCESSING PARAMETERS\n")
+        f.write("-"*80 + "\n")
+        f.write(f"Preprocessing mode: {stats['preprocessing_mode']}\n")
+        f.write(f"Timestamp: {stats['timestamp']}\n\n")
+        
+        f.write("DATA STATISTICS\n")
+        f.write("-"*80 + "\n")
+        f.write(f"Number of proteins:           {stats['n_proteins']:>12,}\n")
+        f.write(f"Unique IPS features (raw):    {stats['n_unique_ips_features']:>12,}\n")
+        f.write(f"Resulting features:           {stats['n_resulting_features']:>12,}\n")
+        f.write(f"Non-zero feature values:      {stats['n_nonzero_values']:>12,}\n")
+        f.write(f"Matrix shape:                 {str(stats['matrix_shape']):>12}\n")
+        f.write(f"Sparsity:                     {stats['sparsity']*100:>11.2f}%\n")
+        f.write(f"Density:                      {(1-stats['sparsity'])*100:>11.2f}%\n\n")
+        
+        f.write("FEATURE DISTRIBUTION\n")
+        f.write("-"*80 + "\n")
+        
+        # Count features by type
+        feature_types = Counter()
+        for fname in feature_names:
+            if 'e_value' in fname:
+                feature_types['E-value'] += 1
+            elif 'binary' in fname:
+                feature_types['Binary'] += 1
+            elif 'count' in fname:
+                feature_types['Count'] += 1
+            elif 'loc_start' in fname:
+                feature_types['Location (start)'] += 1
+            elif 'loc_middle' in fname:
+                feature_types['Location (middle)'] += 1
+            elif 'loc_end' in fname:
+                feature_types['Location (end)'] += 1
+            elif 'center_pos' in fname:
+                feature_types['Center position'] += 1
+            elif 'cluster' in fname:
+                feature_types['Cluster'] += 1
+        
+        for ftype, count in sorted(feature_types.items()):
+            f.write(f"{ftype:<25} {count:>12,}\n")
+        
+        f.write(f"\n{'Total':<25} {sum(feature_types.values()):>12,}\n\n")
+        
+        f.write("PROCESSING TIME\n")
+        f.write("-"*80 + "\n")
+        f.write(f"Parsing:                      {stats['parse_time_sec']:>11.2f}s\n")
+        f.write(f"Transformation:               {stats['transform_time_sec']:>11.2f}s\n")
+        f.write(f"Matrix construction:          {stats['matrix_build_time_sec']:>11.2f}s\n")
+        f.write(f"Total:                        {stats['total_time_sec']:>11.2f}s\n\n")
+        
+        f.write("SAMPLE DATA\n")
+        f.write("-"*80 + "\n")
+        f.write(f"First 5 proteins:\n")
+        for i, pname in enumerate(protein_names[:5], 1):
+            f.write(f"  {i}. {pname}\n")
+        f.write(f"\nFirst 5 features:\n")
+        for i, fname in enumerate(feature_names[:5], 1):
+            f.write(f"  {i}. {fname}\n")
+        
+        f.write("\n" + "="*80 + "\n")
+        f.write("End of report\n")
+        f.write("="*80 + "\n")
+    
+    print(f"  ✓ Summary report saved: {report_path}")
+    
+    return report_path
+
+
+# ============================================================================
+# MAIN PIPELINE
+# ============================================================================
+
+def main():
+    """Main pipeline for IPS feature processing."""
+    parser = argparse.ArgumentParser(
+        description='Process InterProScan features and generate HDF5 output',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Preprocessing modes:
+  binary      - Binary encoding (0/1) only
+  e-value     - E-values (-log transformed) + binary features (DEFAULT)
+  counts      - E-values + binary + non-overlapping occurrence counts
+  location    - E-values + binary + 3-part location split (N-term/middle/C-term)
+  location_b  - E-values + binary + relative center position (0-1)
+  clusters    - E-values + binary + IPS cluster aggregation
+
+Example usage:
+  python ips_feature_pipeline.py /path/to/ips_dir output.h5
+  python ips_feature_pipeline.py /path/to/ips_dir output.h5 --preprocessing counts
+        """
+    )
+    
+    parser.add_argument('ips_dir', type=str,
+                       help='Directory containing InterProScan TSV files')
+    parser.add_argument('output', type=str,
+                       help='Output HDF5 file path')
+    parser.add_argument('--preprocessing', type=str, default='e-value',
+                       choices=['binary', 'e-value', 'counts', 'location', 'location_b', 'clusters'],
+                       help='Preprocessing mode (default: e-value)')
+    
+    args = parser.parse_args()
+    
+    # Validate input directory
+    if not os.path.isdir(args.ips_dir):
+        print(f"Error: Directory not found: {args.ips_dir}")
+        sys.exit(1)
+    
+    # Ensure output directory exists
+    output_dir = os.path.dirname(args.output)
+    if output_dir and not os.path.exists(output_dir):
+        os.makedirs(output_dir)
+    
+    try:
+        # Build feature matrix
+        matrix, feature_names, protein_names, stats = build_feature_matrix(
+            args.ips_dir, 
+            args.preprocessing
+        )
+        
+        # Save to HDF5
+        save_to_hdf5(
+            args.output,
+            matrix,
+            feature_names,
+            protein_names,
+            stats,
+            args.ips_dir,
+            args.preprocessing
+        )
+        
+        # Generate summary report
+        report_path = generate_summary_report(
+            args.output,
+            stats,
+            feature_names,
+            protein_names
+        )
+        
+        print("\n" + "="*70)
+        print("SUCCESS!")
+        print("="*70)
+        print(f"HDF5 file:      {args.output}")
+        print(f"Summary report: {report_path}")
+        print("="*70 + "\n")
+        
+    except Exception as e:
+        print(f"\nERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    main()
